@@ -1,30 +1,35 @@
 """The clipboard and the key press, which is where a dictation actually lands.
 
-Everything here shells out, so the tools are faked. What the tests hold onto is
-the command line: a paste that presses the wrong keys, or in the wrong order,
-types nothing and looks like a hang.
+Everything here is faked: the programs the two Linux desktops shell out to, and
+the frameworks macOS goes through. What the tests hold onto is what was asked
+for. A paste that presses the wrong keys, or in the wrong order, types nothing
+and looks like a hang.
 
-Both desktops owe the same promises, so those are written once and run against
-each of them. A third one added to paste.py inherits the same list rather than
-needing its own copy of it.
+Every system owes the same promises about the clipboard, so those are written
+once and run against each of them. A fourth one added to paste.py inherits the
+same list rather than needing its own copy of it. Each class says which system
+it is standing on, which is why none of this is skipped anywhere: the Linux half
+is checked on a Mac and the macOS half on Linux, and a change to the chooser
+cannot quietly break the platform nobody is sitting at.
 """
 
 import os
 import subprocess
+import sys
 import unittest
 from typing import ClassVar
 from unittest import mock
 
 import paste
-from tests.support import DikteTest, FakeCompleted, linux_only, only_these_tools
+from tests.support import DikteTest, FakeCompleted, only_these_tools
 
 
-@linux_only
 class Chooser(DikteTest):
     """Which pair of programs this session's clipboard goes through."""
 
-    def under(self, **env):
-        with mock.patch.dict(os.environ, env, clear=True):
+    def under(self, platform="linux", **env):
+        with mock.patch.object(sys, "platform", platform), \
+                mock.patch.dict(os.environ, env, clear=True):
             return paste.desktop()
 
     def test_a_wayland_session(self):
@@ -46,18 +51,29 @@ class Chooser(DikteTest):
     def test_nothing_set_at_all(self):
         self.assertIs(self.under(), paste.WAYLAND)
 
+    def test_a_mac(self):
+        self.assertIs(self.under("darwin"), paste.MACOS)
 
-class DesktopContract:
-    """What both desktops owe. Each of them subclasses this once, below."""
+    def test_a_mac_running_an_x_server_is_still_a_mac(self):
+        """XQuartz sets DISPLAY, and none of X's programs are what pastes here."""
+        self.assertIs(self.under("darwin", DISPLAY=":0"), paste.MACOS)
+
+
+class Standing:
+    """A test that runs as if it were sitting at one particular system."""
 
     env: ClassVar[dict] = {}
+    platform = "linux"
     here = None
 
     def setUp(self):
         super().setUp()
+        self.enterContext(mock.patch.object(sys, "platform", self.platform))
         self.enterContext(mock.patch.dict(os.environ, self.env, clear=True))
 
-    # ---- reading the clipboard -------------------------------------------
+
+class ClipboardContract(Standing):
+    """What every system owes the text on its way to the clipboard."""
 
     def test_no_reader_installed(self):
         with only_these_tools():
@@ -81,13 +97,10 @@ class DesktopContract:
                 mock.patch.object(subprocess, "run", side_effect=OSError("nope")):
             self.assertIsNone(paste.read_clipboard())
 
-    # ---- copying ----------------------------------------------------------
-
-    def test_no_clipboard_tool_installed_says_what_to_install(self):
+    def test_no_clipboard_tool_installed_names_it(self):
         with only_these_tools(), self.assertRaises(paste.PasteError) as caught:
             paste.copy("hello")
         self.assertIn(self.here.clipboard, str(caught.exception))
-        self.assertIn(self.here.packages.split(" and ")[0], str(caught.exception))
 
     def test_the_text_goes_in_as_utf8(self):
         with only_these_tools(self.here.clipboard), \
@@ -138,7 +151,15 @@ class DesktopContract:
             paste.copy_bytes(b"\x89PNG\r\n")
         self.assertEqual(run.call_args.kwargs["input"], b"\x89PNG\r\n")
 
-    # ---- pressing the key -------------------------------------------------
+    def test_the_paste_key_it_offers_is_one_it_can_press(self):
+        """Whatever Settings lists, pressing it must not come back unknown."""
+        for shortcut in self.here.shortcuts:
+            with self.subTest(shortcut=shortcut):
+                self.assertTrue(self.pressing(shortcut))
+
+
+class KeyProgramContract(Standing):
+    """The half of it that is another program: ydotool, xdotool."""
 
     def press(self, shortcut, result=None):
         with only_these_tools(self.here.keyboard), \
@@ -147,6 +168,10 @@ class DesktopContract:
                                   return_value=result or FakeCompleted()) as run:
             paste.press(shortcut)
         return run.call_args.args[0]
+
+    def pressing(self, shortcut):
+        """The command a shortcut would run, for the contract above."""
+        return self.press(shortcut)
 
     def test_no_keyboard_tool_installed(self):
         with only_these_tools():
@@ -180,9 +205,11 @@ class DesktopContract:
         self.assertIn(self.here.keyboard, str(caught.exception))
         self.assertIn("no socket", str(caught.exception))
 
+    def test_nothing_named_presses_the_one_this_desktop_pastes_with(self):
+        self.assertEqual(self.press(""), self.press(self.here.shortcuts[0]))
 
-@linux_only
-class Wayland(DesktopContract, DikteTest):
+
+class Wayland(ClipboardContract, KeyProgramContract, DikteTest):
     env: ClassVar[dict] = {"XDG_SESSION_TYPE": "wayland",
                            "WAYLAND_DISPLAY": "wayland-0"}
     here = paste.WAYLAND
@@ -208,8 +235,7 @@ class Wayland(DesktopContract, DikteTest):
         self.assertIn("ydotoold", str(caught.exception))
 
 
-@linux_only
-class X11(DesktopContract, DikteTest):
+class X11(ClipboardContract, KeyProgramContract, DikteTest):
     env: ClassVar[dict] = {"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}
     here = paste.X11
 
@@ -230,6 +256,150 @@ class X11(DesktopContract, DikteTest):
         with self.assertRaises(paste.PasteError) as caught:
             self.press("ctrl+v", FakeCompleted(returncode=1, stderr="bad keysym"))
         self.assertNotIn("ydotoold", str(caught.exception))
+
+
+class FakeCoreGraphics:
+    """Enough of the two frameworks to watch what a paste does to them.
+
+    The events are numbers standing in for pointers, which is all the code
+    treats them as: it makes them, sets flags on them, posts them, and hands
+    them back.
+    """
+
+    def __init__(self, trusted=True, makes=None):
+        self.trusted = trusted
+        self.makes = makes   # how many it will hand out; None for as many as asked
+        self.made = []       # (keycode, is_down)
+        self.flags = []      # (event, flags)
+        self.posted = []     # (tap, event)
+        self.released = []
+
+    # --- ApplicationServices
+    def AXIsProcessTrusted(self):
+        return self.trusted
+
+    def CGEventCreateKeyboardEvent(self, source, keycode, down):
+        self.made.append((keycode, down))
+        if self.makes is not None and len(self.made) > self.makes:
+            return None
+        return 1000 + len(self.made)
+
+    def CGEventSetFlags(self, event, flags):
+        self.flags.append((event, flags))
+
+    def CGEventPost(self, tap, event):
+        self.posted.append((tap, event))
+
+    # --- CoreFoundation
+    def CFRelease(self, event):
+        self.released.append(event)
+
+
+class MacOS(ClipboardContract, DikteTest):
+    platform = "darwin"
+    here = paste.MACOS
+
+    def setUp(self):
+        super().setUp()
+        self.api = FakeCoreGraphics()
+        self.patch_attr(paste, "_macos_api", lambda: (self.api, self.api))
+        self.patch_attr(paste.time, "sleep", lambda seconds: None)
+        # It opens the settings pane once per run; each test gets its own run.
+        self.patch_attr(paste, "_asked_for_permission", False)
+        self.opened = self.patch_attr(paste.subprocess, "Popen", mock.Mock())
+
+    def pressing(self, shortcut):
+        paste.press(shortcut)
+        return self.api.posted
+
+    def test_the_key_goes_in_by_position_with_the_modifiers_on_it(self):
+        paste.press("cmd+v")
+        self.assertEqual(self.api.made, [(9, True), (9, False)])
+        self.assertEqual([flags for _, flags in self.api.flags],
+                         [paste.MAC_FLAGS["command"]] * 2)
+        self.assertEqual([tap for tap, _ in self.api.posted],
+                         [paste.HID_EVENT_TAP] * 2)
+
+    def test_the_down_is_posted_before_the_up(self):
+        paste.press("cmd+v")
+        self.assertEqual([event for _, event in self.api.posted], [1001, 1002])
+
+    def test_both_events_are_handed_back(self):
+        """CoreGraphics gives out memory that nothing else will free."""
+        paste.press("cmd+v")
+        self.assertEqual(sorted(self.api.released), [1001, 1002])
+
+    def test_several_modifiers_are_one_number(self):
+        paste.press("cmd+shift+v")
+        self.assertEqual(self.api.flags[0][1],
+                         paste.MAC_FLAGS["command"] | paste.MAC_FLAGS["shift"])
+
+    def test_the_names_a_mac_keyboard_uses(self):
+        for name in ("cmd", "command", "meta", "super"):
+            with self.subTest(name=name):
+                self.assertEqual(paste._macos_keys(f"{name}+v"),
+                                 (9, paste.MAC_FLAGS["command"]))
+        self.assertEqual(paste._macos_keys("option+v"), paste._macos_keys("alt+v"))
+        self.assertEqual(paste._macos_keys("control+v"), paste._macos_keys("ctrl+v"))
+
+    def test_case_and_spacing_do_not_matter(self):
+        self.assertEqual(paste._macos_keys(" Cmd + V "), paste._macos_keys("cmd+v"))
+
+    def test_a_key_nobody_mapped_is_refused_before_anything_is_posted(self):
+        with self.assertRaises(paste.PasteError) as caught:
+            paste.press("cmd+f13")
+        self.assertIn("f13", str(caught.exception))
+        self.assertEqual(self.api.posted, [])
+
+    def test_a_modifier_nobody_mapped(self):
+        with self.assertRaises(paste.PasteError) as caught:
+            paste.press("hyper+v")
+        self.assertIn("hyper", str(caught.exception))
+
+    def test_nothing_at_all(self):
+        with self.assertRaises(paste.PasteError):
+            paste.press("+")
+
+    def test_nothing_is_typed_until_macos_says_so(self):
+        self.api.trusted = False
+        with self.assertRaises(paste.PasteError) as caught:
+            paste.press("cmd+v")
+        self.assertIn("Accessibility", str(caught.exception))
+        self.assertEqual(self.api.posted, [])
+
+    def test_the_permission_pane_is_opened_once_and_not_again(self):
+        """It is a window in the user's face, and one paste is every dictation."""
+        self.api.trusted = False
+        for _ in range(3):
+            with self.assertRaises(paste.PasteError):
+                paste.press("cmd+v")
+        self.opened.assert_called_once()
+        self.assertIn("Privacy_Accessibility", self.opened.call_args.args[0][1])
+
+    def test_a_system_that_will_not_open_the_pane_still_says_what_is_wrong(self):
+        self.api.trusted = False
+        self.opened.side_effect = OSError("no open(1) here")
+        with self.assertRaises(paste.PasteError) as caught:
+            paste.press("cmd+v")
+        self.assertIn("Accessibility", str(caught.exception))
+
+    def test_readiness_is_the_permission_rather_than_a_program(self):
+        self.assertTrue(paste.paste_ready())
+        self.api.trusted = False
+        self.assertFalse(paste.paste_ready())
+
+    def test_an_event_that_could_not_be_made_takes_its_pair_with_it(self):
+        self.api.makes = 1            # the second one comes back null
+        with self.assertRaises(paste.PasteError):
+            paste.press("cmd+v")
+        self.assertEqual(self.api.released, [1001])
+        self.assertEqual(self.api.posted, [])
+
+    def test_the_frameworks_not_being_there_is_not_a_crash(self):
+        """Every other system imports this module too, and must survive it."""
+        self.patch_attr(paste, "_macos_api",
+                        mock.Mock(side_effect=paste.PasteError("no such library")))
+        self.assertFalse(paste.paste_ready())
 
 
 if __name__ == "__main__":

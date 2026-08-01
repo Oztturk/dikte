@@ -1,21 +1,35 @@
-"""Settings storage in ~/.config/dikte/config.json"""
+"""Settings storage, in the place this system keeps a program's settings."""
 
 import hashlib
 import json
 import os
 import pathlib
+import sys
 
 import api
 import i18n
+import paste
 
 
 def _xdg(var, default):
     return pathlib.Path(os.environ.get(var) or os.path.expanduser(default))
 
 
-CONFIG_DIR = _xdg("XDG_CONFIG_HOME", "~/.config") / "dikte"
+def _directories(platform=None):
+    """(settings, data), in the two places this system keeps them.
+
+    macOS keeps both in the one directory a Mac user's backup already knows
+    about. Everywhere else they are separate and follow the XDG variables.
+    """
+    if (platform or sys.platform) == "darwin":
+        support = pathlib.Path.home() / "Library/Application Support/Dikte"
+        return support, support
+    return (_xdg("XDG_CONFIG_HOME", "~/.config") / "dikte",
+            _xdg("XDG_DATA_HOME", "~/.local/share") / "dikte")
+
+
+CONFIG_DIR, DATA_DIR = _directories()
 CONFIG_FILE = CONFIG_DIR / "config.json"
-DATA_DIR = _xdg("XDG_DATA_HOME", "~/.local/share") / "dikte"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 RECORDINGS_DIR = DATA_DIR / "recordings"
 MEETINGS_DIR = DATA_DIR / "meetings"
@@ -375,7 +389,7 @@ DEFAULTS = {
     "cleanup_reasoning": "",        # empty -> whatever the model does by default
     "cleanup_prompt": "",           # empty -> language-specific default
     "auto_paste": True,
-    "paste_shortcut": "ctrl+v",
+    "paste_shortcut": paste.desktop().shortcuts[0],   # cmd+v on a Mac
     "restore_clipboard": False,
     "mic_target": "",
     "max_seconds": 300,

@@ -1,8 +1,12 @@
-"""Level metering, the WAV writer, and what pactl is asked for.
+"""Level metering, the WAV writer, and what the sound system is asked for.
 
 The device list is where a platform port lands first, so the parsing is pinned
-here: a source that is not a monitor is an input, one that is belongs to the
-speakers, and neither list may go missing when pactl is absent.
+here: on Linux a source that is not a monitor is an input, one that is belongs
+to the speakers, and neither list may go missing when pactl is absent. macOS
+answers the same three questions out of one ffmpeg listing.
+
+Each class says which machine it is standing on, so both halves run on either
+one: nothing here reaches a real sound server.
 """
 
 import array
@@ -11,6 +15,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import unittest
 import wave
 from unittest import mock
@@ -19,13 +24,28 @@ import audio
 from tests.support import (
     DikteTest,
     FakeCompleted,
-    linux_only,
     only_these_tools,
     pcm,
     silence,
     stereo,
     tone,
 )
+
+
+class OnLinux:
+    """A test that runs as if the machine ran PulseAudio or PipeWire."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(mock.patch.object(sys, "platform", "linux"))
+
+
+class OnMacOS:
+    """A test that runs as if the machine were a Mac."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(mock.patch.object(sys, "platform", "darwin"))
 
 
 class ChunkLevels(unittest.TestCase):
@@ -115,8 +135,7 @@ SOURCES = [
 ]
 
 
-@linux_only
-class Devices(DikteTest):
+class Devices(OnLinux, DikteTest):
     @contextlib.contextmanager
     def pactl(self, sources=None, sink=None, tools=("pactl",)):
         payloads = {
@@ -216,8 +235,7 @@ class FakeProcess:
         self._alive = False
 
 
-@linux_only
-class RecordingCommand(DikteTest):
+class RecordingCommand(OnLinux, DikteTest):
     """Which program captures the microphone, and how it is asked to."""
 
     def test_parec_is_preferred(self):
@@ -270,8 +288,7 @@ class RecordingCommand(DikteTest):
                                   if arg.startswith(flag)])
 
 
-@linux_only
-class RecorderChain(DikteTest):
+class RecorderChain(OnLinux, DikteTest):
     """Start to WAV, with pw-record faked out."""
 
     def record(self, data, target="", max_seconds=300):
@@ -401,6 +418,147 @@ class RecorderChain(DikteTest):
                 mock.patch.object(subprocess, "Popen", side_effect=OSError("nope")):
             recorder.start()
         self.assertEqual(len(failures), 1)
+        self.assertFalse(recorder.active)
+
+
+class MeetingCommand(unittest.TestCase):
+    """One process reading both devices, because two would drift apart."""
+
+    def command(self, platform, mic="", system="them"):
+        with mock.patch.object(sys, "platform", platform):
+            return audio.meeting_command(mic, system)
+
+    def test_linux_reads_both_through_pulse(self):
+        cmd = self.command("linux", mic="mine")
+        self.assertEqual(cmd.count("pulse"), 2)
+        self.assertEqual(cmd[cmd.index("mine") - 1], "-i")
+        self.assertEqual(cmd[cmd.index("them") - 1], "-i")
+
+    def test_a_mac_reads_both_through_avfoundation(self):
+        cmd = self.command("darwin", mic="1")
+        self.assertEqual(cmd.count("avfoundation"), 2)
+        self.assertIn(":1", cmd)
+        self.assertIn(":them", cmd)
+
+    def test_no_microphone_named_means_the_default_one(self):
+        self.assertIn("default", self.command("linux"))
+        self.assertIn(":default", self.command("darwin"))
+
+    def test_both_merge_the_two_into_one_stereo_stream(self):
+        for platform in ("linux", "darwin"):
+            with self.subTest(platform=platform):
+                cmd = self.command(platform)
+                self.assertIn(audio.MERGE_FILTER, cmd)
+                self.assertEqual(cmd[cmd.index("-map") + 1], "[out]")
+                self.assertEqual(cmd[cmd.index("-f", cmd.index("-map")) + 1], "s16le")
+
+    def test_neither_lets_ffmpeg_read_the_terminal(self):
+        """It shares stdin with Dikte, and would eat a keypress meant for it."""
+        for platform in ("linux", "darwin"):
+            with self.subTest(platform=platform):
+                self.assertIn("-nostdin", self.command(platform))
+
+
+class MacDevices(OnMacOS, DikteTest):
+    """The one ffmpeg listing all three device questions are answered from."""
+
+    LISTING = (
+        "[AVFoundation indev @ 0x7fb] AVFoundation video devices:\n"
+        "[AVFoundation indev @ 0x7fb] [0] FaceTime HD Camera\n"
+        "[AVFoundation indev @ 0x7fb] [1] Capture screen 0\n"
+        "[AVFoundation indev @ 0x7fb] AVFoundation audio devices:\n"
+        "[AVFoundation indev @ 0x7fb] [0] MacBook Pro Microphone\n"
+        "[AVFoundation indev @ 0x7fb] [1] BlackHole 2ch\n"
+        ": Input/output error\n"
+    )
+
+    @contextlib.contextmanager
+    def listing(self, stderr=None, tools=("ffmpeg",)):
+        completed = FakeCompleted(
+            returncode=1, stderr=self.LISTING if stderr is None else stderr)
+        with only_these_tools(*tools), \
+                mock.patch.object(subprocess, "run", return_value=completed):
+            yield
+
+    def test_the_audio_half_of_the_listing_is_the_only_half_read(self):
+        with self.listing():
+            self.assertEqual(audio.list_sources(),
+                             [("0", "MacBook Pro Microphone"), ("1", "BlackHole 2ch")])
+
+    def test_the_index_is_what_ffmpeg_is_given_and_the_name_what_is_shown(self):
+        with self.listing():
+            name, description = audio.list_sources()[1]
+        self.assertEqual(name, "1")
+        self.assertIn("BlackHole", description)
+
+    def test_no_ffmpeg_installed(self):
+        with only_these_tools():
+            self.assertEqual(audio.list_sources(), [])
+            self.assertEqual(audio.list_monitors(), [])
+            self.assertEqual(audio.default_monitor(), "")
+
+    def test_an_ffmpeg_that_will_not_run(self):
+        with only_these_tools("ffmpeg"), \
+                mock.patch.object(subprocess, "run", side_effect=OSError("nope")):
+            self.assertEqual(audio.list_sources(), [])
+
+    def test_a_listing_with_no_audio_section(self):
+        with self.listing(stderr="[AVFoundation indev @ 0x7fb] [0] FaceTime\n"):
+            self.assertEqual(audio.list_sources(), [])
+
+    def test_the_far_side_of_a_meeting_is_offered_the_same_devices(self):
+        """macOS calls none of them an output, so the loopback one is in here."""
+        with self.listing():
+            self.assertEqual(audio.list_monitors(), audio.list_sources())
+
+    def test_the_loopback_driver_is_picked_out_by_name(self):
+        with self.listing():
+            self.assertEqual(audio.default_monitor(), "1")
+
+    def test_the_other_two_drivers_people_install(self):
+        for name in ("Loopback Audio", "Soundflower (2ch)"):
+            with self.subTest(name=name):
+                listing = ("AVFoundation audio devices:\n"
+                           f"[0] Built-in Microphone\n[1] {name}\n")
+                with self.listing(stderr=listing):
+                    self.assertEqual(audio.default_monitor(), "1")
+
+    def test_a_mac_with_nothing_to_record_the_far_side_from(self):
+        listing = "AVFoundation audio devices:\n[0] MacBook Pro Microphone\n"
+        with self.listing(stderr=listing):
+            self.assertEqual(audio.default_monitor(), "")
+
+
+class MacRecordingCommand(OnMacOS, DikteTest):
+    def test_the_microphone_is_read_through_avfoundation(self):
+        with only_these_tools("ffmpeg"):
+            cmd = audio.recording_command()
+        self.assertEqual(cmd[0], "ffmpeg")
+        self.assertEqual(cmd[cmd.index("-f") + 1], "avfoundation")
+
+    def test_the_empty_half_in_front_of_the_colon_is_the_missing_picture(self):
+        with only_these_tools("ffmpeg"):
+            self.assertIn(":default", audio.recording_command())
+            self.assertIn(":2", audio.recording_command("2"))
+
+    def test_it_captures_the_format_the_rest_of_the_code_expects(self):
+        with only_these_tools("ffmpeg"):
+            cmd = audio.recording_command()
+        self.assertEqual(cmd[cmd.index("-ar") + 1], str(audio.RATE))
+        self.assertEqual(cmd[cmd.index("-ac") + 1], str(audio.CHANNELS))
+        self.assertEqual(cmd[-2:], ["s16le", "-"])
+
+    def test_no_ffmpeg_installed(self):
+        with only_these_tools():
+            self.assertEqual(audio.recording_command(), [])
+
+    def test_what_a_mac_is_told_to_install(self):
+        recorder = audio.Recorder()
+        failures = []
+        recorder.failed.connect(failures.append)
+        with only_these_tools():
+            recorder.start()
+        self.assertIn("brew install ffmpeg", failures[0])
         self.assertFalse(recorder.active)
 
 

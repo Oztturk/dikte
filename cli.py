@@ -720,7 +720,7 @@ def cmd_shortcut(opts):
     combo = (opts.combo or conf[key] or ("Ctrl+Space" if opts.which == "toggle" else "")).strip()
     if not combo:
         return fail(opts, "no combination given and none stored; pass --combo", 2)
-    if hotkey.parse_shortcut(combo) == (None, None):
+    if not hotkey.valid_shortcut(combo):
         return fail(opts, f"cannot parse that combination: {combo}", 2)
     clashes = hotkey.conflicting_shortcuts(combo, desktop_id)
     if clashes and not opts.force:

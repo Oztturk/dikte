@@ -31,6 +31,7 @@ directories, resets the language, and puts them back afterwards.
 | A reply that fails | `http_error(429)`, `url_error()`, `raw_body("not json")` |
 | Reading what was sent | `sent_json(request)`, `multipart_fields(request)` |
 | A program on the PATH | `only_these_tools("pactl", "wl-copy")` |
+| Standing on another system | `mock.patch.object(sys, "platform", "darwin")` |
 | Audio | `silence()`, `tone()`, `speech()`, `stereo()`, `make_wav()` |
 | A settings object | `self.config(cleanup_enabled=False)` |
 
@@ -52,30 +53,35 @@ forgets fails rather than hangs.
 
 ## Another platform
 
-Most of what Dikte does is not desktop-specific, and the tests are split along
-that line. 511 of them pass anywhere: transcription, cleanup, the config file,
-the history, the agent, the command line, the timeline of a meeting. The
-remaining 59 cover what Dikte *is* on this desktop, and carry `@linux_only`
-from `tests.support`: PipeWire capture and the pactl device list, wl-clipboard
-and ydotool, KDE's shortcut file and the `/dev/input` listener.
+Three systems are supported: Wayland, X11 and macOS. Each one is a named entry
+in a table, and one chooser picks between them, so a fourth adds an entry and a
+line rather than a branch inside every function. The three tables are
+`paste.Desktop` (clipboard and key press), `audio.Sound` (capture and the device
+lists) and the `_macos()`/`_gnome()` pair in `hotkey.py`. Keep `sys.platform`
+inside the chooser and read it there every time: a constant settled at import is
+one no test can stand somewhere else.
 
-Mark a test `@linux_only` when it would fail on a machine that never had those
-programs. Do not mark one because it happens to be convenient: a test that
-quietly stops running on the platform you are porting to protects nothing.
-
-The other half of a port is where the branch goes. Keep `sys.platform` out of
-the middle of a function; make the public name a chooser and give each platform
-its own function underneath:
+The tests are split along the same line, and almost none of them are skipped.
+697 of the 737 run on any machine, including every line of the Wayland, X11 and
+macOS backends: the programs are faked at `shutil.which`, the frameworks at the
+one function that loads them. A test class says which system it is standing on
+rather than avoiding the question:
 
 ```python
-def copy(text):
-    return _copy_macos(text) if sys.platform == "darwin" else _copy_wayland(text)
+class MacOS(ClipboardContract, DikteTest):
+    platform = "darwin"
+    here = paste.MACOS
 ```
 
-Then each platform's test calls its own function directly and passes everywhere,
-and adding a third one leaves the first two's tests alone. An `if` buried inside
-`copy()` forces every existing test to patch `sys.platform` instead, and the
-next port breaks all of them.
+so the Linux half is checked on a Mac and the macOS half on Linux, and a change
+to a chooser cannot quietly break the platform nobody is sitting at. What the
+systems owe in common is written once as a contract class and subclassed by each
+of them.
+
+The 40 that do carry `@linux_only` are the ones that would need the real thing:
+the `/dev/input` listener, KDE's shortcut file, GNOME's gsettings. Mark a test
+that way only when faking it would leave nothing to test. A test that quietly
+stops running on the platform you are porting to protects nothing.
 
 ## What a pull request should carry
 

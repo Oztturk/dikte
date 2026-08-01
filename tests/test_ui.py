@@ -6,13 +6,16 @@ save, so a setting added to one half and not the other is silently reset the
 next time anybody presses Save. That is the failure this catches.
 """
 
+import sys
 import unittest
+from typing import ClassVar
 from unittest import mock
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 import config as cfg
 import overlay as overlay_module
+import paste
 import settings_ui
 from tests.support import DikteTest, only_these_tools
 
@@ -80,10 +83,16 @@ CHANGED = {
 
 
 class Settings(DikteTest):
+    # What a Mac shows instead, where the combination on offer is a different
+    # one. Everything else about the window is the same on both.
+    changed = CHANGED
+    platform = "linux"
+
     def setUp(self):
         super().setUp()
         # No pactl, no model lists over the network, and no modal dialogue
         # waiting for somebody to press OK.
+        self.enterContext(mock.patch.object(sys, "platform", self.platform))
         self.enterContext(only_these_tools())
         self.enterContext(mock.patch.object(QMessageBox, "information"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
@@ -116,11 +125,11 @@ class Settings(DikteTest):
         self.assertEqual(conf.data, before)
 
     def test_a_setting_of_your_own_survives_the_round_trip(self):
-        self.write_config(CHANGED)
+        self.write_config(self.changed)
         conf = cfg.Config()
         self.window(conf)._save()
         stored = self.read_config_file()
-        for key, value in CHANGED.items():
+        for key, value in self.changed.items():
             with self.subTest(key=key):
                 self.assertEqual(stored[key], value)
 
@@ -173,6 +182,34 @@ class Settings(DikteTest):
         self.write_config({"ui_language": "tr"})
         window = self.window(cfg.Config())
         self.assertEqual(window.windowTitle(), "Dikte Ayarları")
+
+
+class MacSettings(Settings):
+    """The same window and the same round trip, standing on a Mac.
+
+    Nothing here is about macOS: it is the rest of the window, checked on the
+    platform where three of its widgets are gone and one offers other keys.
+    """
+
+    platform = "darwin"
+    changed: ClassVar[dict] = {**CHANGED, "paste_shortcut": "cmd+shift+v"}
+
+    def test_there_is_no_install_button_where_nothing_is_installed(self):
+        window = self.window(cfg.Config())
+        labels = [button.text() for button in
+                  window.findChildren(settings_ui.QPushButton)]
+        self.assertFalse([text for text in labels if "shortcut" in text.lower()])
+
+    def test_the_listener_is_not_offered_as_a_choice(self):
+        """It is the whole mechanism there; turning it off would leave nothing."""
+        window = self.window(cfg.Config())
+        self.assertFalse(window.evdev_enabled.isVisible())
+
+    def test_the_paste_keys_on_offer_are_the_ones_a_mac_uses(self):
+        window = self.window(cfg.Config())
+        offered = [window.paste_shortcut.itemText(index)
+                   for index in range(window.paste_shortcut.count())]
+        self.assertEqual(offered, paste.MACOS.shortcuts)
 
 
 class Overlay(DikteTest):

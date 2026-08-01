@@ -80,9 +80,9 @@ TR = {
         "{service} hesapta kredi kalmadığını söylüyor (HTTP 402).",
     "{service} is rate limiting you (HTTP 429). Try again in a moment.":
         "{service} hız sınırı uyguluyor (HTTP 429). Birazdan tekrar dene.",
-    "The KDE shortcut is live now, so the built-in listener has been "
-    "turned off. It was doubling every key press.":
-        "KDE kısayolu artık çalışıyor, bu yüzden dahili dinleyici kapatıldı. "
+    "The {desktop} shortcut is live now, so the built-in listener has "
+    "been turned off. It was doubling every key press.":
+        "{desktop} kısayolu artık çalışıyor, bu yüzden dahili dinleyici kapatıldı. "
         "Her tuşa basışı ikiye katlıyordu.",
     "No speech detected": "Ses algılanmadı",
     "No speech detected ({level} dB)": "Ses algılanmadı ({level} dB)",
@@ -104,11 +104,14 @@ TR = {
     "Could not start recording: {error}": "Kayıt başlatılamadı: {error}",
     "No audio recorder found. Install pulseaudio-utils or pipewire-audio.":
         "Ses kayıt aracı bulunamadı. pulseaudio-utils ya da pipewire-audio kur.",
+    "ffmpeg not found. Install it with: brew install ffmpeg":
+        "ffmpeg bulunamadı. Şununla kur: brew install ffmpeg",
     "Audio recorder stopped before receiving sound: {error}":
         "Ses kayıt aracı veri alamadan kapandı: {error}",
     "Could not copy to clipboard: {error}": "Panoya kopyalanamadı: {error}",
     "{tool} not found. Install {packages}.":
         "{tool} bulunamadı. {packages} paketlerini kur.",
+    "{tool} not found.": "{tool} bulunamadı.",
     "{tool} exited with code {code}.": "{tool} {code} koduyla çıktı.",
     "{tool} not found, cannot paste automatically.":
         "{tool} bulunamadı, otomatik yapıştırma yapılamıyor.",
@@ -117,6 +120,10 @@ TR = {
     "{tool} failed: {error}": "{tool} hatası: {error}",
     "Is ydotoold running? (systemctl --user status ydotool)":
         "ydotoold çalışıyor mu? (systemctl --user status ydotool)",
+    "macOS has not been told to let Dikte press keys. Turn Dikte on under "
+    "System Settings → Privacy & Security → Accessibility.":
+        "macOS, Dikte'nin tuşlara basmasına henüz izin vermiyor. Sistem Ayarları "
+        "→ Gizlilik ve Güvenlik → Erişilebilirlik altında Dikte'yi aç.",
 
     # --- api errors ----------------------------------------------------
     "{service} API key is empty. Add it in Settings.":
@@ -154,6 +161,8 @@ TR = {
     "Paste key": "Yapıştırma tuşu",
     "Terminals usually want ctrl+shift+v. Change this if pasting does nothing.":
         "Terminaller genelde ctrl+shift+v ister. Yapıştırma çalışmıyorsa bunu değiştir.",
+    "macOS asks for Accessibility permission the first time this is sent.":
+        "macOS bu ilk gönderildiğinde Erişilebilirlik izni ister.",
     "Restore the previous clipboard after pasting":
         "Yapıştırdıktan sonra eski pano içeriğini geri koy",
     "Indicator corner": "Gösterge köşesi",
@@ -166,8 +175,7 @@ TR = {
     "Skip silent recordings (don't call the API)":
         "Sessiz kayıtları atla (API'ye gönderme)",
     "Silence threshold": "Sessizlik eşiği",
-    "Keep audio files (~/.local/share/dikte/recordings)":
-        "Ses kayıtlarını sakla (~/.local/share/dikte/recordings)",
+    "Keep audio files ({path})": "Ses kayıtlarını sakla ({path})",
 
     # --- settings: api --------------------------------------------------
     "Keys": "Anahtarlar",
@@ -270,7 +278,7 @@ TR = {
     "Saved: {path}": "Kaydedildi: {path}",
 
     # --- settings: shortcut ------------------------------------------------
-    "Install as a KDE shortcut": "KDE kısayolu olarak kur",
+    "Install as a {desktop} shortcut": "{desktop} kısayolu olarak kur",
     "Install as a global shortcut": "Global kısayol olarak kur",
     "Remove": "Kaldır",
     "Registered in KDE: {shortcut}": "KDE'de kayıtlı: {shortcut}",
@@ -284,8 +292,10 @@ TR = {
     "Shortcut saved: {shortcut}": "Kısayol kaydedildi: {shortcut}",
     "Could not register the GNOME shortcut: {error}":
         "GNOME kısayolu kaydedilemedi: {error}",
-    "Use the built-in listener (/dev/input), for when the KDE shortcut is not active yet":
-        "Yerleşik dinleyici kullan (/dev/input), KDE kısayolu henüz etkin değilken",
+    "Use the built-in listener (/dev/input), for when the {desktop} shortcut "
+    "is not active yet":
+        "Yerleşik dinleyici kullan (/dev/input), {desktop} kısayolu henüz etkin "
+        "değilken",
     "Works immediately, no session restart. The only difference: the key "
     "combination also reaches the focused application.":
         "Anında çalışır, oturum yenilemek gerekmez. Tek farkı: tuş kombinasyonu "
@@ -296,6 +306,13 @@ TR = {
         "KWin, kısayol ayarlarını yalnızca açılışta okur. 'Kur' dedikten sonra kısayol "
         "Sistem Ayarları → Kısayollar altında görünür ama oturumu yeniden açana kadar "
         "tetiklenmez. O zamana kadar yerleşik dinleyiciyi kullanabilirsin.",
+    "The shortcut starts working as soon as it is installed.":
+        "Kısayol kurulur kurulmaz çalışmaya başlar.",
+    "Dikte asks macOS for these combinations itself, while it is running. "
+    "Nothing is installed, and no other application receives them in the "
+    "meantime.":
+        "Dikte bu kombinasyonları çalışırken macOS'tan kendisi ister. Hiçbir şey "
+        "kurulmaz ve o sırada başka hiçbir uygulama bu tuşları almaz.",
     "Shortcut conflict": "Kısayol çakışması",
     "{shortcut} is also used by:\n\n{list}\n\nInstall anyway?":
         "{shortcut} şu girdilerde de kullanılıyor:\n\n{list}\n\nYine de kurulsun mu?",
@@ -308,6 +325,15 @@ TR = {
     "Could not write the desktop file: {error}": "Desktop dosyası yazılamadı: {error}",
     "Could not write kglobalshortcutsrc: {error}": "kglobalshortcutsrc yazılamadı: {error}",
     "Could not parse the shortcut: {shortcut}": "Kısayol çözümlenemedi: {shortcut}",
+    "Shortcut saved: {shortcut}\nDikte holds this one itself while it is "
+    "running, so it works as soon as the settings are saved.":
+        "Kısayol kaydedildi: {shortcut}\nDikte bunu çalıştığı sürece kendisi "
+        "tutar, yani ayarlar kaydedilir kaydedilmez çalışır.",
+    "Could not reach the macOS shortcut service: {error}":
+        "macOS kısayol servisine ulaşılamadı: {error}",
+    "macOS would not give Dikte {shortcut}; another application already holds it.":
+        "macOS {shortcut} kombinasyonunu Dikte'ye vermedi; başka bir uygulama "
+        "onu şimdiden tutuyor.",
     "Cannot read /dev/input. Your user needs to be in the 'input' group:\n"
     "  sudo usermod -aG input $USER   (then log out and back in)":
         "/dev/input okunamıyor. Kullanıcının 'input' grubunda olması gerekir:\n"
@@ -527,6 +553,12 @@ TR = {
     "Same as dictation": "Diktedekiyle aynı",
     "Current output": "Geçerli çıkış",
     "The other participants": "Karşı tarafın sesi",
+    "macOS does not offer what the speakers are playing as something to "
+    "record. Install BlackHole or Loopback, send the meeting's sound through "
+    "it, and pick it above.":
+        "macOS, hoparlörden çıkan sesi kaydedilebilir bir kaynak olarak sunmaz. "
+        "BlackHole ya da Loopback kur, toplantının sesini oradan geçir ve "
+        "yukarıdan onu seç.",
     "Wear headphones if you can. Through speakers your microphone hears the "
     "other side as well, and although a line that lands on both channels at "
     "once is dropped again, the repair is never as clean as not needing it.":

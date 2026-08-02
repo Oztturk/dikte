@@ -512,6 +512,10 @@ class SettingsWindow(QDialog):
             self.meetings.finished.connect(self._on_minutes_finished)
             self.meetings.failed.connect(self._on_minutes_failed)
         self._load()
+        # Connected after the load, so that filling the boxes in is not taken
+        # for the user ticking them.
+        self.file_timestamps.toggled.connect(self._remember_file_choices)
+        self.file_cleanup.toggled.connect(self._remember_file_choices)
         # On a machine where nothing can transcribe yet, this window was opened
         # because of that, so open it on the tab that fixes it.
         if not conf.transcribe_ready():
@@ -1159,7 +1163,7 @@ class SettingsWindow(QDialog):
         self.file_run = QPushButton(t("Transcribe"))
         self.file_run.clicked.connect(self._run_file)
         self.file_stop = QPushButton(t("Stop"))
-        self.file_stop.clicked.connect(self.transcriber.stop)
+        self.file_stop.clicked.connect(self._stop_file)
         self.file_stop.setEnabled(False)
         run_row = QHBoxLayout()
         run_row.addWidget(self.file_run)
@@ -1713,6 +1717,20 @@ class SettingsWindow(QDialog):
         self.file_path = path
         self.file_label.setText(os.path.basename(path))
         self.conf["file_last_dir"] = os.path.dirname(path)
+        self._remember_file_choices()
+
+    def _remember_file_choices(self):
+        """Keep this tab's choices without waiting for the Save button.
+
+        The two switches and the folder belong to the run rather than to the
+        form: what was ticked before Transcribe is what the next file wants
+        too, and Save is at the far end of a window opened to transcribe one
+        file. Everything else on the tab is a button, so there is nothing here
+        an unsaved form could be caught by.
+        """
+        self.conf["file_timestamps"] = self.file_timestamps.isChecked()
+        self.conf["file_cleanup"] = self.file_cleanup.isChecked()
+        self.conf.save()
 
     def _run_file(self):
         if not getattr(self, "file_path", "") or self.transcriber.busy:
@@ -1727,6 +1745,13 @@ class SettingsWindow(QDialog):
             self.file_timestamps.isChecked(),
             self.file_cleanup.isChecked(),
         )
+
+    def _stop_file(self):
+        # The button goes dead here rather than when the run comes back, so a
+        # second press cannot land while the first one is still travelling.
+        self.file_stop.setEnabled(False)
+        self.file_status.setText(t("Stopping…"))
+        self.transcriber.stop()
 
     def _on_file_progress(self, message):
         self.file_status.setText(message)

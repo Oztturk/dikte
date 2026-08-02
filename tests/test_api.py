@@ -3,10 +3,17 @@
 Nothing here reaches the network. What is checked is the request that would have
 gone out, because that is what a new provider changes and what an old one
 notices: the URL, the headers, the fields of the multipart body, the JSON.
+
+Stopping one is the exception. Cutting a request off is done to the socket it
+is blocked on, and a faked urlopen has no socket to cut, so those tests talk to
+a server of their own on the loopback interface.
 """
 
+import http.server
 import json
 import os
+import threading
+import time
 import unittest
 
 import api
@@ -578,3 +585,118 @@ class TranscribeHere(DikteTest):
         with fake_urlopen({"segments": [{"start": 0, "end": 1, "text": " hi"}]}) as calls:
             api.transcribe_segments(LOCAL, self.wav)
         self.assertEqual(multipart_fields(calls[0])["model"], "ggml-base.bin")
+
+
+class Stopping(unittest.TestCase):
+    """The Stop button, from the far end: a request already blocked on a reply.
+
+    The one that matters is a whisper on this machine, which answers minutes
+    after it was asked, so it is a real socket here rather than a fake urlopen.
+    Nothing leaves the loopback interface.
+    """
+
+    def setUp(self):
+        answering = threading.Event()
+
+        class Slow(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                answering.set()
+                time.sleep(30)          # the model, thinking
+
+            def log_message(self, *args):
+                pass
+
+        self.answering = answering
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Slow)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/v1/x"
+
+    def post(self, aborter, out):
+        try:
+            api._request(self.url, b"{}", {}, timeout=30, aborter=aborter)
+            out.append("answered")
+        except BaseException as exc:      # noqa: BLE001 - the type is the result
+            out.append(type(exc).__name__)
+
+    def test_a_request_waiting_on_a_reply_is_cut_off(self):
+        aborter, out = api.Aborter(), []
+        thread = threading.Thread(target=self.post, args=(aborter, out))
+        thread.start()
+        self.assertTrue(self.answering.wait(10))
+        aborter.abort()
+        thread.join(timeout=10)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(out, ["Aborted"])
+
+    def test_a_request_that_starts_after_the_stop_never_goes_out(self):
+        aborter, out = api.Aborter(), []
+        aborter.abort()
+        self.post(aborter, out)
+        self.assertEqual(out, ["Aborted"])
+        self.assertFalse(self.answering.is_set())
+
+    def test_without_one_the_request_is_the_plain_urllib_one(self):
+        """Everything that is not stoppable keeps the opener it always had."""
+        with fake_urlopen({"text": "hi"}) as calls:
+            api._request(self.url, b"{}", {})
+        self.assertEqual(len(calls), 1)
+
+
+class Sockets(unittest.TestCase):
+    """The few lines urllib takes between making a connection and blocking on
+    it. A stop that lands in there must not leave the request waiting out its
+    hour-long local timeout."""
+
+    class FakeConn:
+        auto_open = 1
+        sock = None
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    def test_a_connection_opened_after_the_stop_is_refused(self):
+        sockets = api._Sockets()
+        sockets.cut()
+        with self.assertRaises(api.Aborted):
+            sockets.add(self.FakeConn())
+
+    def test_one_that_is_already_open_is_closed_where_it_stands(self):
+        sockets, conn = api._Sockets(), self.FakeConn()
+        sockets.add(conn)
+        sockets.cut()
+        self.assertTrue(conn.closed)
+
+    def test_one_with_no_socket_yet_is_stopped_from_making_another(self):
+        """close() leaves auto_open on, and the next line would reconnect."""
+        sockets, conn = api._Sockets(), self.FakeConn()
+        sockets.add(conn)
+        sockets.cut()
+        self.assertEqual(conn.auto_open, 0)
+
+
+class Aborter(unittest.TestCase):
+    def test_what_was_registered_is_run_once_the_stop_lands(self):
+        aborter, cut = api.Aborter(), []
+        with aborter.holding(lambda: cut.append(True)):
+            aborter.abort()
+        self.assertEqual(cut, [True])
+
+    def test_a_block_that_ended_is_not_cut_afterwards(self):
+        aborter, cut = api.Aborter(), []
+        with aborter.holding(lambda: cut.append(True)):
+            pass
+        aborter.abort()
+        self.assertEqual(cut, [])
+
+    def test_a_stop_that_already_landed_stops_the_next_step_too(self):
+        aborter = api.Aborter()
+        aborter.abort()
+        with self.assertRaises(api.Aborted):
+            aborter.check()
+        with self.assertRaises(api.Aborted):
+            with aborter.holding(lambda: None):
+                pass

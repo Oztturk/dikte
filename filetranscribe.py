@@ -18,6 +18,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 import api
 import cleanup
+import ggml
 from i18n import t
 
 CHUNK_SECONDS = 600          # 10 min ≈ 19 MB at 16 kHz mono s16
@@ -29,8 +30,9 @@ MIN_SUBTITLE_SECONDS = 1.5   # how long a cue with no end time of its own stays 
 STAMP_RE = re.compile(r"^\[(?:(\d+):)?(\d{1,2}):(\d{2})\]\s*")
 
 
-class Cancelled(Exception):
-    pass
+# What a stopped run comes back with, wherever it was stopped: the request that
+# was cut off raises it from api, and the steps in between raise it themselves.
+Cancelled = api.Aborted
 
 
 class FileTranscriber(QObject):
@@ -42,7 +44,9 @@ class FileTranscriber(QObject):
         super().__init__(parent)
         self.conf = conf
         self._thread = None
-        self._stop = threading.Event()
+        self._abort = api.Aborter()
+        # The server on this machine the work is with, when it is with one.
+        self._local = None
 
     @property
     def busy(self):
@@ -51,18 +55,26 @@ class FileTranscriber(QObject):
     def start(self, path, timestamps, do_cleanup):
         if self.busy:
             return
-        self._stop.clear()
+        self._abort = api.Aborter()      # the last one is spent
         self._thread = threading.Thread(
             target=self._work, args=(path, timestamps, do_cleanup), daemon=True
         )
         self._thread.start()
 
     def stop(self):
-        self._stop.set()
+        """Cut the run off where it stands, rather than at the next step."""
+        self._abort.abort()
+        # Closing the socket is nothing to a server on this machine: it is a
+        # process of ours, and it would grind on to the end of the chunk with
+        # nobody left to hand the answer to. Stopping it is what stops the
+        # work; the next run starts it again. Killing waits on the process, so
+        # not on the thread the window is drawn from.
+        local = self._local
+        if local is not None:
+            threading.Thread(target=local.stop, daemon=True).start()
 
     def _check(self):
-        if self._stop.is_set():
-            raise Cancelled
+        self._abort.check()
 
     def _work(self, path, timestamps, do_cleanup):
         conf = self.conf
@@ -73,7 +85,7 @@ class FileTranscriber(QObject):
 
             workdir = tempfile.mkdtemp(prefix="dikte-file-")
             self.progress.emit(t("Converting audio…"))
-            wav_path = _to_wav(path, workdir)
+            wav_path = _to_wav(path, workdir, self._abort)
             self._check()
 
             chunks = split_wav(wav_path, workdir)
@@ -81,6 +93,7 @@ class FileTranscriber(QObject):
                 self.progress.emit(t("Splitting into {count} chunks…", count=len(chunks)))
 
             target = conf.transcribe_target()
+            self._local = ggml.whisper if target.provider == "local" else None
             pieces = []
             segments = []
             for index, (chunk_path, offset) in enumerate(chunks, start=1):
@@ -96,6 +109,7 @@ class FileTranscriber(QObject):
                             chunk_path,
                             language=conf["language"],
                             prompt=conf["transcribe_prompt"],
+                            aborter=self._abort,
                         )
                     )
                     pieces = [f"[{format_timestamp(start)}] {line}"
@@ -106,6 +120,7 @@ class FileTranscriber(QObject):
                         chunk_path,
                         language=conf["language"],
                         prompt=conf["transcribe_prompt"],
+                        aborter=self._abort,
                     ))
 
             text = "\n".join(pieces) if timestamps else " ".join(pieces)
@@ -122,16 +137,18 @@ class FileTranscriber(QObject):
         except (api.ApiError, OSError, subprocess.SubprocessError, wave.Error) as exc:
             self.failed.emit(str(exc))
         finally:
+            self._local = None
             if workdir:
                 shutil.rmtree(workdir, ignore_errors=True)
 
     def _cleanup(self, text, timestamps):
         conf = self.conf
+        self._local = ggml.llm if cleanup.provider(conf) == "local" else None
         prompt = conf.cleanup_prompt(with_timestamps=timestamps, subtitles=True)
         out = []
         for block in split_text(text, timestamps):
             self._check()
-            out.append(cleanup.run(block, conf, prompt))
+            out.append(cleanup.run(block, conf, prompt, aborter=self._abort))
         return ("\n" if timestamps else "\n\n").join(out)
 
 
@@ -194,17 +211,34 @@ def to_srt(text, segments):
     return "\n\n".join(blocks) + "\n" if blocks else ""
 
 
-def _to_wav(path, workdir):
+def _reap(proc):
+    """Leave nothing running behind a conversion that did not finish."""
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+
+
+def _to_wav(path, workdir, aborter=None):
     out = os.path.join(workdir, "audio.wav")
-    res = subprocess.run(
+    proc = subprocess.Popen(
         ["ffmpeg", "-nostdin", "-y", "-i", path, "-vn",
          "-ac", "1", "-ar", str(RATE), "-c:a", "pcm_s16le", out],
-        capture_output=True, text=True,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True,
     )
-    if res.returncode != 0 or not os.path.exists(out):
-        tail = (res.stderr or "").strip().splitlines()
+    # A two hour film is a minute of ffmpeg, which is a minute of a Stop button
+    # doing nothing unless the abort reaches the process itself.
+    with contextlib.ExitStack() as stack:
+        stack.callback(_reap, proc)
+        if aborter is not None:
+            stack.enter_context(aborter.holding(proc.kill))
+        _stdout, stderr = proc.communicate()
+    if aborter is not None:
+        aborter.check()
+    if proc.returncode != 0 or not os.path.exists(out):
+        tail = (stderr or "").strip().splitlines()
         raise api.ApiError(t("Could not read the file: {error}",
-                             error=tail[-1] if tail else res.returncode))
+                             error=tail[-1] if tail else proc.returncode))
     return out
 
 

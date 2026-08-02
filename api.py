@@ -11,10 +11,14 @@ is up, which is the one thing this module has to fill in for it.
 """
 
 import collections
+import contextlib
+import http.client
 import json
 import mimetypes
 import os
 import secrets
+import socket
+import threading
 import urllib.error
 import urllib.request
 
@@ -59,6 +63,142 @@ class ApiError(Exception):
         self.status = status
 
 
+class Aborted(Exception):
+    """A request that was cut off from another thread rather than answered."""
+
+
+class Aborter:
+    """A Stop button that reaches the call a worker thread is blocked inside.
+
+    urlopen() hands nothing back until the server has answered, and a whisper on
+    this machine is minutes away from answering, so a flag read between calls is
+    a Stop that does nothing until the work it was meant to stop is already
+    done. What is registered here is cut off where it stands instead.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._cancels = []
+        self.aborted = False
+
+    def abort(self):
+        with self._lock:
+            self.aborted = True
+            pending, self._cancels = self._cancels, []
+        for cancel in pending:
+            cancel()
+
+    def check(self):
+        if self.aborted:
+            raise Aborted
+
+    @contextlib.contextmanager
+    def holding(self, cancel):
+        """Run `cancel` if an abort lands while this block is open."""
+        with self._lock:
+            if self.aborted:
+                raise Aborted
+            self._cancels.append(cancel)
+        try:
+            yield
+        finally:
+            with self._lock:
+                with contextlib.suppress(ValueError):
+                    self._cancels.remove(cancel)
+
+
+class _Sockets:
+    """The connections one request is using, and whether it may still use any.
+
+    A stop can land at any point of the handful of lines urllib takes to get
+    from "make a connection" to "wait for the reply", so this keeps the two
+    halves of the answer together: what is already open is cut, and anything
+    opened after that is refused rather than quietly left to block.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._conns = []
+        self._cut = False
+
+    def add(self, conn):
+        with self._lock:
+            if self._cut:
+                raise Aborted
+            self._conns.append(conn)
+
+    def cut(self):
+        with self._lock:
+            self._cut = True
+            conns = list(self._conns)
+        for conn in conns:
+            _stop_using(conn)
+
+
+def _stop_using(conn):
+    """Take a connection out of use, connected or not.
+
+    A connection whose socket is not open yet would open one on the next line,
+    so the reconnect is turned off first. One that is open is being read from,
+    and close() alone leaves that read waiting for bytes which are never coming
+    now; the shutdown is what makes it return.
+    """
+    conn.auto_open = 0
+    sock = getattr(conn, "sock", None)
+    if sock is not None:
+        with contextlib.suppress(OSError):
+            sock.shutdown(socket.SHUT_RDWR)
+    with contextlib.suppress(OSError):
+        conn.close()
+
+
+class _TrackedHTTP(urllib.request.HTTPHandler):
+    """urllib's own handler, handing the connection it opens to `sockets`.
+
+    That connection is what a Stop is applied to, and urlopen() makes it out of
+    sight, inside the call that is about to block on it.
+    """
+
+    def __init__(self, sockets):
+        super().__init__()
+        self._sockets = sockets
+
+    def http_open(self, req):
+        return self.do_open(self._connect, req)
+
+    def _connect(self, host, **kwargs):
+        conn = http.client.HTTPConnection(host, **kwargs)
+        self._sockets.add(conn)
+        return conn
+
+
+class _TrackedHTTPS(urllib.request.HTTPSHandler):
+    def __init__(self, sockets):
+        super().__init__()
+        self._sockets = sockets
+
+    def https_open(self, req):
+        return self.do_open(self._connect, req, context=self._context)
+
+    def _connect(self, host, **kwargs):
+        conn = http.client.HTTPSConnection(host, **kwargs)
+        self._sockets.add(conn)
+        return conn
+
+
+@contextlib.contextmanager
+def _opened(req, timeout, aborter):
+    """The response, left where `aborter` can cut it off."""
+    if aborter is None:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            yield resp
+        return
+    sockets = _Sockets()
+    opener = urllib.request.build_opener(_TrackedHTTP(sockets), _TrackedHTTPS(sockets))
+    with aborter.holding(sockets.cut), opener.open(req, timeout=timeout) as resp:
+        yield resp
+
+
 def explain(exc, service):
     """Turn an HTTP status into something the user can act on."""
     if exc.status in (401, 403):
@@ -74,16 +214,21 @@ def explain(exc, service):
     return ApiError(f"{service}: {exc}", exc.status)
 
 
-def _request(url, data, headers, timeout=120):
+def _request(url, data, headers, timeout=120, aborter=None):
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _opened(req, timeout, aborter) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
         raise ApiError(f"HTTP {exc.code}: {_extract_error(body)}", exc.code) from exc
-    except urllib.error.URLError as exc:
-        raise ApiError(t("Could not connect: {reason}", reason=exc.reason)) from exc
+    except (OSError, http.client.HTTPException) as exc:
+        # A socket that went out from under the read is this run being stopped,
+        # not the network failing. URLError is an OSError, so both land here.
+        if aborter is not None and aborter.aborted:
+            raise Aborted from None
+        raise ApiError(t("Could not connect: {reason}",
+                         reason=getattr(exc, "reason", exc))) from exc
     except json.JSONDecodeError as exc:
         raise ApiError(t("Could not parse the response: {error}", error=exc)) from exc
 
@@ -165,7 +310,7 @@ def local_failure(service, server, exc):
 
 
 def _transcribe_request(target, wav_path, language, prompt, response_format,
-                        granularity=None, timeout=300):
+                        granularity=None, timeout=300, aborter=None):
     if target.provider == "local":
         # The timeouts here are sized for a hosted API, where a slow answer is a
         # bill running. Locally the only thing being spent is time.
@@ -189,6 +334,7 @@ def _transcribe_request(target, wav_path, language, prompt, response_format,
         return _request(
             f"{target.base_url.rstrip('/')}/audio/transcriptions", body,
             _headers(target.provider, target.api_key, ctype), timeout=timeout,
+            aborter=aborter,
         )
     except ApiError as exc:
         if target.provider == "local":
@@ -235,9 +381,9 @@ def _merge_word_splits(segments):
     return merged
 
 
-def transcribe(target, wav_path, language="", prompt="", timeout=300):
+def transcribe(target, wav_path, language="", prompt="", timeout=300, aborter=None):
     data = _transcribe_request(
-        target, wav_path, language, prompt, "json", timeout=timeout
+        target, wav_path, language, prompt, "json", timeout=timeout, aborter=aborter
     )
     text = data.get("text") or ""
     if target.provider == "local":
@@ -248,12 +394,13 @@ def transcribe(target, wav_path, language="", prompt="", timeout=300):
     return text
 
 
-def transcribe_segments(target, wav_path, language="", prompt="", timeout=300):
+def transcribe_segments(target, wav_path, language="", prompt="", timeout=300,
+                        aborter=None):
     """[(start_seconds, end_seconds, text)] using whisper-1's verbose response."""
     data = _transcribe_request(
         target._replace(model=timestamp_model(target.provider, target.model)),
         wav_path, language, prompt, "verbose_json",
-        granularity="segment", timeout=timeout,
+        granularity="segment", timeout=timeout, aborter=aborter,
     )
     segments = data.get("segments") or []
     if target.provider == "local":
@@ -311,7 +458,7 @@ def local_ceiling(text):
 
 def cleanup(text, api_key, model, system_prompt, reasoning="",
             base_url=OPENROUTER_URL, timeout=180, provider="openrouter",
-            service="OpenRouter"):
+            service="OpenRouter", aborter=None):
     if not api_key and provider != "local-llm":
         raise ApiError(t("{service} API key is empty. Add it in Settings.",
                          service=service))
@@ -331,7 +478,7 @@ def cleanup(text, api_key, model, system_prompt, reasoning="",
             f"{base_url.rstrip('/')}/chat/completions",
             json.dumps(payload).encode("utf-8"),
             _headers(provider, api_key, "application/json"),
-            timeout=timeout,
+            timeout=timeout, aborter=aborter,
         )
     except ApiError as exc:
         raise explain(exc, service) from None

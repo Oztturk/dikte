@@ -266,6 +266,43 @@ class Settings(DikteTest):
         window = self.window(cfg.Config())
         self.assertEqual(window.windowTitle(), "Dikte Ayarları")
 
+    def test_the_audio_file_switches_are_kept_without_the_save_button(self):
+        """They are ticked to transcribe one file, not to fill in a form."""
+        self.write_config({"file_timestamps": False, "file_cleanup": True})
+        window = self.window(cfg.Config())
+        window.file_timestamps.setChecked(True)
+        window.file_cleanup.setChecked(False)
+        stored = self.read_config_file()
+        self.assertTrue(stored["file_timestamps"])
+        self.assertFalse(stored["file_cleanup"])
+
+    def test_loading_the_audio_file_tab_is_not_taken_for_a_change(self):
+        self.write_config({"file_timestamps": True, "file_cleanup": False})
+        conf = cfg.Config()
+        with mock.patch.object(conf, "save") as save:
+            window = self.window(conf)
+        save.assert_not_called()
+        self.assertTrue(window.file_timestamps.isChecked())
+        self.assertFalse(window.file_cleanup.isChecked())
+
+    def test_the_run_button_comes_back_when_the_stop_lands(self):
+        """In whichever language, since the worker says so through t() too."""
+        for language in ("auto", "tr"):
+            with self.subTest(language=language):
+                self.write_config({"ui_language": language})
+                window = self.window(cfg.Config())
+                window.file_run.setEnabled(False)
+                window._on_file_progress(settings_ui.t("Stopped."))
+                self.assertTrue(window.file_run.isEnabled())
+
+    def test_stop_leaves_nothing_to_press_twice(self):
+        window = self.window(cfg.Config())
+        with mock.patch.object(window.transcriber, "stop") as stop:
+            window.file_stop.setEnabled(True)
+            window._stop_file()
+        stop.assert_called_once_with()
+        self.assertFalse(window.file_stop.isEnabled())
+
 
 class Overlay(DikteTest):
     def overlay(self, **kwargs):

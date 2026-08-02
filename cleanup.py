@@ -59,22 +59,27 @@ def model(conf):
     return conf["cleanup_model"]
 
 
-def run(text, conf, system_prompt, timeout=180):
-    """Hand the transcript to whoever is set to clean it up."""
+def run(text, conf, system_prompt, timeout=180, aborter=None):
+    """Hand the transcript to whoever is set to clean it up.
+
+    `aborter` is only of use to the two that answer over HTTP; a CLI is stopped
+    between blocks instead, which is close enough when a block is seconds.
+    """
     name = provider(conf)
     if name == "openrouter":
         return api.cleanup(
             text, conf.openrouter_key(), conf["cleanup_model"], system_prompt,
             reasoning=conf["cleanup_reasoning"],
             base_url=conf["openrouter_base_url"], timeout=timeout,
+            aborter=aborter,
         )
     if name == "local":
-        return _local(text, conf, system_prompt, timeout)
+        return _local(text, conf, system_prompt, timeout, aborter)
     runner = _claude if name == "claude" else _codex
     return runner(text, conf, system_prompt, timeout)
 
 
-def _local(text, conf, system_prompt, timeout):
+def _local(text, conf, system_prompt, timeout, aborter=None):
     """llama.cpp, on this machine, answering the request OpenRouter answers.
 
     No key and no bill, and the address does not exist until the server is up,
@@ -88,7 +93,7 @@ def _local(text, conf, system_prompt, timeout):
             reasoning=conf["local_llm_reasoning"],
             base_url=api.serving(ggml.llm),
             timeout=max(timeout, api.LOCAL_TIMEOUT),
-            provider="local-llm", service=service,
+            provider="local-llm", service=service, aborter=aborter,
         )
     except api.ApiError as exc:
         # A server that died mid-request would otherwise report only that the

@@ -197,7 +197,7 @@ def recording_command(target=""):
         return cmd
     if shutil.which("pw-record"):
         cmd = [
-            "pw-record", "--raw", f"--rate={RATE}",
+            "pw-record", *_pw_record_raw_option(), f"--rate={RATE}",
             f"--channels={CHANNELS}", "--format=s16",
         ]
         if target:
@@ -205,6 +205,25 @@ def recording_command(target=""):
         cmd.append("-")
         return cmd
     return []
+
+
+def _pw_record_raw_option():
+    """Use --raw only on pw-record releases that provide it.
+
+    PipeWire 1.0, including Ubuntu 24.04's build, writes raw PCM to stdout but
+    rejects the newer --raw option. A rejected option ends the recorder before
+    it receives sound, so ask the installed binary which form it understands.
+    """
+    try:
+        result = subprocess.run(
+            ["pw-record", "--help"], capture_output=True, text=True, timeout=2
+        )
+        help_text = (result.stdout or "") + (result.stderr or "")
+    except (subprocess.SubprocessError, OSError):
+        return ["--raw"]  # preserve the existing command when probing itself fails
+    if not help_text.strip():
+        return ["--raw"]
+    return ["--raw"] if "--raw" in help_text else []
 
 
 class MeetingRecorder(QObject):

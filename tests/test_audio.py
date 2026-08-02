@@ -230,6 +230,23 @@ class RecordingCommand(DikteTest):
         with only_these_tools("pw-record"):
             self.assertEqual(audio.recording_command()[0], "pw-record")
 
+    def test_pw_record_uses_raw_when_the_installed_version_supports_it(self):
+        help_result = FakeCompleted(stdout="  --raw  Write raw samples\n")
+        with only_these_tools("pw-record"), \
+                mock.patch.object(audio.subprocess, "run", return_value=help_result):
+            self.assertIn("--raw", audio.recording_command())
+
+    def test_pw_record_omits_raw_when_pipewire_1_0_rejects_it(self):
+        help_result = FakeCompleted(stdout="  --rate  Sample rate\n")
+        with only_these_tools("pw-record"), \
+                mock.patch.object(audio.subprocess, "run", return_value=help_result):
+            self.assertNotIn("--raw", audio.recording_command())
+
+    def test_pw_record_help_failure_keeps_the_existing_command(self):
+        with only_these_tools("pw-record"), \
+                mock.patch.object(audio.subprocess, "run", side_effect=OSError):
+            self.assertIn("--raw", audio.recording_command())
+
     def test_neither_is_installed(self):
         with only_these_tools():
             self.assertEqual(audio.recording_command(), [])
@@ -282,6 +299,7 @@ class RecorderChain(DikteTest):
         recorder.failed.connect(failures.append)
         proc = FakeProcess(data)
         with only_these_tools("pw-record"), \
+                mock.patch.object(audio, "_pw_record_raw_option", return_value=[]), \
                 mock.patch.object(subprocess, "Popen", return_value=proc) as popen:
             recorder.start(target=target, max_seconds=max_seconds)
             recorder._thread.join(timeout=5)
@@ -328,6 +346,7 @@ class RecorderChain(DikteTest):
         recorder.stopped.connect(lambda *args: results.append(args))
         proc = FakeProcess(tone(1.0))
         with only_these_tools("pw-record"), \
+                mock.patch.object(audio, "_pw_record_raw_option", return_value=[]), \
                 mock.patch.object(subprocess, "Popen", return_value=proc):
             recorder.start()
             recorder._thread.join(timeout=5)

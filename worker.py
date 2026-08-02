@@ -18,6 +18,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 import api
 import assistant
 import audio
+import cleanup
 import config as cfg
 import i18n
 import paste
@@ -112,14 +113,7 @@ class Pipeline(QObject):
             if (conf["assistant_cleanup"] if ask else conf["cleanup_enabled"]):
                 self.stage.emit(t("Cleaning up…"))
                 try:
-                    text = api.cleanup(
-                        raw,
-                        conf.openrouter_key(),
-                        conf["cleanup_model"],
-                        conf.cleanup_prompt(),
-                        reasoning=conf["cleanup_reasoning"],
-                        base_url=conf["openrouter_base_url"],
-                    )
+                    text = cleanup.run(raw, conf, conf.cleanup_prompt())
                 except api.ApiError as exc:
                     # Keep the transcript, but never let the failure pass unseen:
                     # a rejected key would otherwise look like working dictation.
@@ -159,7 +153,7 @@ class Pipeline(QObject):
                 "duration": round(duration, 1),
                 "elapsed": round(time.monotonic() - started, 1),
                 "model": target.model,
-                "cleanup_model": conf["cleanup_model"] if conf["cleanup_enabled"] else "",
+                "cleanup_model": cleanup.model(conf) if conf["cleanup_enabled"] else "",
                 "cleanup_error": warning,
                 "mode": "ask" if ask else "",
                 "question": question,

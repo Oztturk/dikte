@@ -1,9 +1,9 @@
 # Dikte
 
-Press `Ctrl+Space`, talk, press again. The recording goes to OpenAI or OpenRouter
-for transcription, a model on OpenRouter cleans it up (dropping the *uh*s, the
-restarts, the missing punctuation), and the result lands in your clipboard and
-is pasted into whatever window you were typing in.
+Press `Ctrl+Space`, talk, press again. The recording is transcribed on this
+machine by default, a model cleans it up (dropping the *uh*s, the restarts, the
+missing punctuation), and the result lands in your clipboard and is pasted into
+whatever window you were typing in.
 
 Built for KDE Plasma 6 on Wayland. No dependencies beyond system packages:
 just the Python standard library and PyQt6.
@@ -17,7 +17,8 @@ just the Python standard library and PyQt6.
 |  |  |
 |---|---|
 | <img src="docs/settings-api.webp" width="410" alt="API and models"> | <img src="docs/settings-cleanup.webp" width="410" alt="Cleanup rules"> |
-| <img src="docs/settings-audio-file.webp" width="410" alt="Audio file"> | <img src="docs/settings-history.webp" width="410" alt="History"> |
+| <img src="docs/settings-agent.webp" width="410" alt="Agent"> | <img src="docs/settings-meeting.webp" width="410" alt="Meeting"> |
+| <img src="docs/settings-audio-file.webp" width="410" alt="Audio file"> | <img src="docs/settings-shortcuts.webp" width="410" alt="Shortcuts"> |
 
 ## Install
 
@@ -25,7 +26,7 @@ just the Python standard library and PyQt6.
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
 systemctl --user enable --now ydotool     # needed for auto-paste
 
-./install.sh                 # or:  ./install.sh "Ctrl+Alt+Space"
+./install.sh                 # or:  ./install.sh "Meta+Space" "Meta+Shift+Space"
 dikte                        # the settings window opens on first run
 ```
 
@@ -36,23 +37,27 @@ tools instead:
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
 
-`install.sh` adds the `dikte` command, a menu entry and an autostart entry. The
-settings window installs a GNOME or KDE global shortcut.
+`install.sh` adds the `dikte` command, a menu entry, an autostart entry and the
+two global shortcuts, whose keys are its two arguments. `./update.sh` pulls and
+puts all of that back, keeping the keys you chose; `./uninstall.sh` takes it away
+again and leaves your settings and dictations alone unless you pass `--purge`.
 
-Two keys go in the settings window: **OpenAI** and **OpenRouter**. Speech to text
-runs on either one (`gpt-4o-transcribe` by default), cleanup always on
-OpenRouter (`google/gemini-3.5-flash-lite`), so a single OpenRouter key can
-cover both. They fall back to `OPENAI_API_KEY` and `OPENROUTER_API_KEY`, and are
-stored in `~/.config/dikte/config.json`, mode 600. Cleanup can be switched off,
-in which case the raw transcript is pasted, and a thinking model's effort can be
-set next to it.
+Speech to text and cleanup each pick a provider in the settings window, and both
+run here by default, on models of your own. The cloud is the other option:
+speech to text on **OpenAI**, **Groq** or **OpenRouter** (`gpt-4o-transcribe`),
+cleanup on OpenRouter (`google/gemini-3.5-flash-lite`) or, when either is
+installed, on Claude Code or Codex. The keys fall back to `OPENAI_API_KEY`,
+`GROQ_API_KEY` and `OPENROUTER_API_KEY`, and are stored in
+`~/.config/dikte/config.json`, mode 600. Cleanup can be switched off, in which
+case the raw transcript is pasted, and a thinking model's effort can be set next
+to it.
 
 ## Using it
 
 | What | How |
 | --- | --- |
 | Start / stop recording | `Ctrl+Space`, or click the tray icon |
-| Cancel a recording | Tray menu → *Cancel recording*, or `dikte cancel` |
+| Discard the recording | `Ctrl+Alt+Space`, tray menu, or `dikte cancel` |
 | Speak a command to an agent | Tray menu → *Ask Claude*, or `dikte ask` |
 | Start / end a meeting | Tray menu → *Record a meeting*, or `dikte meeting` |
 | Settings | Tray menu → *Settings*, or `dikte settings` |
@@ -75,6 +80,12 @@ running.
 
 ## What it does
 
+- **It all runs on this machine by default.** Speech to text on whisper.cpp and
+  cleanup on llama.cpp, neither installed beforehand: the settings window fetches
+  the program and the model, verifies the sha256 and refuses a download published
+  without one, then keeps a server alive while you dictate. The graphics card is
+  reached through CUDA, ROCm or Vulkan where the build allows. No key, no
+  account, nothing leaving the machine.
 - **Silence never reaches the API.** Handed near-silence, a transcription model
   invents a sentence instead of returning nothing ("Thanks for watching", or in
   Turkish "Altyazı M.K."). A recording is dropped when nothing rose 10 dB above
@@ -126,11 +137,11 @@ running.
   right-click to delete.
 - **Turkish and English interface**, following the system locale by default.
 
-## The global shortcut needs one logout
+## The global shortcuts need one logout
 
-KWin only reads `kglobalshortcutsrc` at startup, so the shortcut `install.sh`
+KWin only reads `kglobalshortcutsrc` at startup, so the shortcuts `install.sh`
 writes will not fire until you log out and back in. Until then, Settings →
-Shortcut → **built-in listener** reads `/dev/input` and catches the combination
+Shortcuts → **built-in listener** reads `/dev/input` and catches the combination
 itself. The difference: it does not swallow the key, so `Ctrl+Space` also reaches
 the focused application (some editors will pop up autocomplete). The listener
 needs your user in the `input` group: `sudo usermod -aG input $USER`.
@@ -144,7 +155,10 @@ ipc.py            one request and one reply over the local socket
 audio.py          PCM capture: pw-record for dictation, ffmpeg for a meeting
 meeting.py        channel split, speaker labelling, cleanup, minutes
 assistant.py      running a dictation through Claude Code, Codex or OpenRouter
-api.py            transcription on either provider, OpenRouter cleanup (stdlib only)
+api.py            transcription and cleanup requests (stdlib only)
+cleanup.py        who rewrites the transcript: OpenRouter, here, Claude or Codex
+ggml.py           whisper.cpp and llama.cpp here: fetch, verify, keep serving
+hub.py            what GitHub and Hugging Face have on offer today
 worker.py         transcribe → clean up → clipboard → paste
 vad.py            deciding whether a recording holds speech at all
 filetranscribe.py file transcription: ffmpeg, chunking, timestamps

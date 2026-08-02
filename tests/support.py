@@ -18,6 +18,7 @@ import sys
 import tempfile
 import unittest
 import urllib.error
+import urllib.request
 import wave
 from unittest import mock
 
@@ -38,6 +39,12 @@ linux_only = unittest.skipUnless(
     sys.platform.startswith("linux"),
     "covers the Linux desktop stack (PipeWire, wl-clipboard, ydotool, KDE)",
 )
+
+
+def _no_network(*args, **kwargs):
+    raise AssertionError(
+        "a test reached the network; wrap the call in support.fake_urlopen"
+    )
 
 
 def _no_exec(*args, **kwargs):
@@ -77,6 +84,11 @@ class DikteTest(unittest.TestCase):
         # instance is running. A test that reaches it would take the whole run
         # with it and hang, so it fails loudly here instead.
         self.patch_attr(os, "execv", _no_exec)
+
+        # Every way out of here goes through urllib, so closing it is enough to
+        # keep the suite offline. A test that means to answer a request patches
+        # this again through fake_urlopen.
+        self.patch_attr(urllib.request, "urlopen", _no_network)
 
     # ---- helpers ---------------------------------------------------------
 

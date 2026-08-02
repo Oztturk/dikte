@@ -79,9 +79,12 @@ class Effort(unittest.TestCase):
         self.assertEqual(assistant.CODEX_EFFORT["xhigh"], "high")
         self.assertEqual(assistant.CODEX_EFFORT["max"], "high")
 
-    def test_claude_has_no_rung_below_low(self):
-        self.assertEqual(assistant.CLAUDE_EFFORT["none"], "low")
-        self.assertEqual(assistant.CLAUDE_EFFORT["minimal"], "low")
+    def test_neither_one_asks_for_a_rung_below_low(self):
+        # Claude has none; Codex has one, but calls it "minimal" on the older
+        # models and "none" on the newer ones, and refuses the wrong word.
+        for scale in (assistant.CLAUDE_EFFORT, assistant.CODEX_EFFORT):
+            self.assertEqual(scale["none"], "low")
+            self.assertEqual(scale["minimal"], "low")
 
     def test_an_empty_setting_asks_for_nothing(self):
         self.assertEqual(assistant.CLAUDE_EFFORT.get("", ""), "")
@@ -232,10 +235,10 @@ class SessionMissing(unittest.TestCase):
                 self.assertFalse(assistant._session_missing(text))
 
     def test_the_last_line_is_the_one_worth_showing(self):
-        self.assertEqual(assistant._last_line("warning\n\nreal error\n"),
+        self.assertEqual(assistant.last_line("warning\n\nreal error\n"),
                          "real error")
-        self.assertEqual(assistant._last_line(""), "")
-        self.assertEqual(assistant._last_line(None), "")
+        self.assertEqual(assistant.last_line(""), "")
+        self.assertEqual(assistant.last_line(None), "")
 
 
 class Conclude(DikteTest):

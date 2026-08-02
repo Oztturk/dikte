@@ -75,7 +75,10 @@ CODEX_ITEMS = {
 CLAUDE_EFFORT = {"none": "low", "minimal": "low", "low": "low",
                  "medium": "medium", "high": "high", "xhigh": "xhigh",
                  "max": "max"}
-CODEX_EFFORT = {"none": "minimal", "minimal": "minimal", "low": "low",
+# "minimal" was Codex's bottom rung until the newer models replaced it with
+# "none", and each of them rejects the other's word for it with a 400. "low" is
+# the one every model has, so the two lowest rungs land there instead.
+CODEX_EFFORT = {"none": "low", "minimal": "low", "low": "low",
                 "medium": "medium", "high": "high", "xhigh": "high",
                 "max": "high"}
 
@@ -421,7 +424,7 @@ def _conclude(found, code, stderr, session, service):
     if code != 0 and not found["answer"]:
         if session and _session_missing(stderr):
             raise _SessionGone()
-        raise AssistantError(_last_line(stderr) or found["failure"] or t(
+        raise AssistantError(last_line(stderr) or found["failure"] or t(
             "{service} exited with code {code}.", service=service, code=code))
     if found["failure"] and not found["answer"]:
         raise AssistantError(found["failure"])
@@ -480,6 +483,11 @@ def _finish(proc):
     return stderr
 
 
-def _last_line(text):
+def last_line(text):
+    """The line worth showing out of a CLI's stderr: the last one it wrote.
+
+    Shared with cleanup, which runs the same two programs for a different job
+    and fails the same way when they are unhappy.
+    """
     lines = [line for line in (text or "").splitlines() if line.strip()]
     return lines[-1].strip() if lines else ""

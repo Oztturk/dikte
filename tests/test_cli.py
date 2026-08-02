@@ -14,8 +14,9 @@ from unittest import mock
 
 import cli
 import config as cfg
+import hotkey
 import ipc
-from tests.support import DikteTest
+from tests.support import DikteTest, fake_urlopen
 
 
 class Options:
@@ -143,6 +144,22 @@ class Parser(unittest.TestCase):
         opts = self.parse()
         self.assertIsNone(opts.verb)
         self.assertEqual(opts.func, cli.cmd_plain)
+
+    def test_every_global_shortcut_runs_a_verb_that_exists(self):
+        """A shortcut registers a command line; a verb the parser never heard of
+        is a key that does nothing at all when it is pressed."""
+        for name, spec in hotkey.SHORTCUTS.items():
+            with self.subTest(name=name):
+                opts = self.parse(spec.verb)
+                self.assertTrue(callable(opts.func))
+
+    def test_every_shortcut_can_be_installed_and_removed_by_name(self):
+        for name in hotkey.SHORTCUTS:
+            with self.subTest(name=name):
+                self.assertEqual(self.parse("shortcut", "install", name).which,
+                                 name)
+                self.assertEqual(self.parse("shortcut", "remove", name).which,
+                                 name)
 
     def test_every_verb_is_wired_to_something(self):
         for verb in ("record", "toggle", "start", "stop", "cancel", "ask",
@@ -314,6 +331,67 @@ class ConfigCommands(DikteTest):
         _, out, _ = self.run_cmd(cli.cmd_prompt, which=None, json=True)
         self.assertEqual(set(json.loads(out)["prompts"]),
                          {"cleanup", "subtitles", "meeting", "agent"})
+
+
+class Providers(DikteTest):
+    """The terminal reaches every provider the settings window does."""
+
+    def run_cmd(self, func, **values):
+        with captured() as (out, err):
+            code = func(Options(**values))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_provider_the_settings_window_offers_is_a_choice_here_too(self):
+        parser = cli.build_parser()
+        for provider in cfg.TRANSCRIBERS:
+            with self.subTest(provider=provider):
+                opts = parser.parse_args(["models", "--provider", provider])
+                self.assertEqual(opts.provider, provider)
+                self.assertEqual(parser.parse_args(["test-key", provider]).which,
+                                 provider)
+
+    def test_the_model_list_is_read_from_the_chosen_provider(self):
+        self.write_config({"groq_api_key": "gsk-test"})
+        with fake_urlopen({"data": [{"id": "whisper-large-v3"}]}) as calls:
+            code, out, _ = self.run_cmd(cli.cmd_models, provider="groq",
+                                        transcription=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0].full_url, "https://api.groq.com/openai/v1/models")
+        self.assertEqual(out.strip(), "whisper-large-v3")
+
+    def test_a_key_that_is_not_there_is_reported_under_its_own_name(self):
+        code, out, _ = self.run_cmd(cli.cmd_test_key, which="groq")
+        self.assertEqual(code, 1)
+        self.assertIn("groq", out)
+        self.assertIn("Groq", out)
+
+
+class Doctor(DikteTest):
+    """One pass over everything the settings window checks behind its buttons."""
+
+    def run_doctor(self, as_json=True, **settings):
+        self.write_config(settings)
+        with mock.patch.object(ipc, "send", return_value=None), \
+                captured() as (out, _err):
+            cli.cmd_doctor(Options(json=as_json))
+        return json.loads(out.getvalue()) if as_json else out.getvalue()
+
+    def test_cleanup_on_openrouter_is_a_question_about_the_key(self):
+        reply = self.run_doctor(cleanup_model="some/model")
+        self.assertEqual(reply["cleanup"]["provider"], "openrouter")
+        self.assertEqual(reply["cleanup"]["model"], "some/model")
+        self.assertIn("OpenRouter key, cleaning up on some/model",
+                      self.run_doctor(as_json=False, cleanup_model="some/model"))
+
+    def test_cleanup_on_a_cli_is_a_question_about_the_program(self):
+        reply = self.run_doctor(cleanup_provider="codex",
+                                cleanup_codex_model="gpt-5.4")
+        self.assertEqual(reply["cleanup"]["provider"], "codex")
+        self.assertEqual(reply["cleanup"]["model"], "gpt-5.4")
+        self.assertIn("codex", reply["programs"])
+        self.assertIn("codex, cleaning up on gpt-5.4",
+                      self.run_doctor(as_json=False, cleanup_provider="codex",
+                                      cleanup_codex_model="gpt-5.4"))
 
 
 class Finding(DikteTest):

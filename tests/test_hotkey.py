@@ -6,6 +6,7 @@ import subprocess
 import unittest
 from unittest import mock
 
+import config as cfg
 import hotkey
 from tests.support import DikteTest, FakeCompleted, linux_only
 
@@ -54,6 +55,28 @@ class ParseShortcut(unittest.TestCase):
 
     def test_something_that_is_not_even_a_string(self):
         self.assertEqual(hotkey.parse_shortcut(None), (None, None))
+
+
+class Table(unittest.TestCase):
+    """The one list of global shortcuts. The command line, the settings window
+    and install.sh read it instead of keeping a copy each, so what it has to
+    hold together is checked here rather than in three places."""
+
+    def test_every_shortcut_remembers_itself_in_a_real_setting(self):
+        for name, spec in hotkey.SHORTCUTS.items():
+            with self.subTest(name=name):
+                self.assertIn(spec.setting, cfg.DEFAULTS)
+
+    def test_no_two_share_a_desktop_entry(self):
+        ids = [spec.desktop_id for spec in hotkey.SHORTCUTS.values()]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_only_the_toggle_falls_back_to_a_key_of_its_own(self):
+        """The rest are off until you pick one, and emptying the box is how you
+        turn them off again."""
+        self.assertEqual(hotkey.SHORTCUTS["toggle"].fallback, "Ctrl+Space")
+        self.assertEqual([name for name, spec in hotkey.SHORTCUTS.items()
+                          if spec.fallback], ["toggle"])
 
 
 class ModsMatch(unittest.TestCase):
@@ -121,6 +144,23 @@ class Bindings(DikteTest):
                                             "ask": "Ctrl+Alt+Space"}))
             thread.assert_called_once()
         self.assertEqual(len(listener._bindings[57]), 2)
+
+    def test_starting_and_discarding_do_not_fire_on_each_other(self):
+        """The two defaults are one modifier apart on the same key code, so the
+        modifier set is the only thing keeping them apart."""
+        listener = hotkey.EvdevHotkey()
+        self.addCleanup(listener.stop)
+        with mock.patch.object(listener, "_open_devices", return_value=[99]), \
+                mock.patch.object(hotkey.threading, "Thread"):
+            listener.start({"toggle": "Ctrl+Space", "cancel": "Ctrl+Alt+Space"})
+
+        def fired(held):
+            return [name for mods, name in listener._bindings[57]
+                    if hotkey.EvdevHotkey._mods_match(held, mods)]
+
+        self.assertEqual(fired({29}), ["toggle"])          # ctrl
+        self.assertEqual(fired({29, 56}), ["cancel"])      # ctrl + alt
+        self.assertEqual(fired({29, 42}), [])              # ctrl + shift
 
 
 class Chooser(DikteTest):

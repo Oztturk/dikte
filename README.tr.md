@@ -1,9 +1,8 @@
 # Dikte
 
-`Ctrl+Space`'e bas, konuş, tekrar bas. Ses OpenAI'ye ya da OpenRouter'a gidip
-yazıya çevrilir, OpenRouter'daki bir model transkripti temizler (ıı'lar,
-tekrarlar, eksik noktalama), sonuç panoya kopyalanır ve o an yazdığın pencereye
-yapıştırılır.
+`Ctrl+Space`'e bas, konuş, tekrar bas. Ses varsayılan olarak bu makinede yazıya
+çevrilir, bir model transkripti temizler (ıı'lar, tekrarlar, eksik noktalama),
+sonuç panoya kopyalanır ve o an yazdığın pencereye yapıştırılır.
 
 KDE Plasma 6 / Wayland için yazıldı. Sistem paketleri dışında bağımlılığı yok:
 sadece Python standart kütüphanesi ve PyQt6.
@@ -17,7 +16,8 @@ sadece Python standart kütüphanesi ve PyQt6.
 |  |  |
 |---|---|
 | <img src="docs/settings-api.webp" width="410" alt="API ve modeller"> | <img src="docs/settings-cleanup.webp" width="410" alt="Temizleme kuralları"> |
-| <img src="docs/settings-audio-file.webp" width="410" alt="Ses dosyası"> | <img src="docs/settings-history.webp" width="410" alt="Geçmiş"> |
+| <img src="docs/settings-agent.webp" width="410" alt="Ajan"> | <img src="docs/settings-meeting.webp" width="410" alt="Toplantı"> |
+| <img src="docs/settings-audio-file.webp" width="410" alt="Ses dosyası"> | <img src="docs/settings-shortcuts.webp" width="410" alt="Kısayollar"> |
 
 ## Kurulum
 
@@ -25,7 +25,7 @@ sadece Python standart kütüphanesi ve PyQt6.
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
 systemctl --user enable --now ydotool     # otomatik yapıştırma için
 
-./install.sh                 # ya da:  ./install.sh "Ctrl+Alt+Space"
+./install.sh                 # ya da:  ./install.sh "Meta+Space" "Meta+Shift+Space"
 dikte                        # ilk açılışta ayarlar penceresi gelir
 ```
 
@@ -36,13 +36,18 @@ araçlarıyla çalışır:
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
 
-`install.sh` `dikte` komutunu, menü girdisini ve oturum açılışında otomatik
-başlatmayı kurar. Ayarlar penceresi GNOME veya KDE global kısayolunu kurar.
+`install.sh` `dikte` komutunu, menü girdisini, oturum açılışında otomatik
+başlatmayı ve iki global kısayolu kurar; tuşları da iki argümanı. `./update.sh`
+son sürümü çeker ve bunları senin seçtiğin tuşlarla yerine koyar;
+`./uninstall.sh` hepsini geri alır, `--purge` demedikçe ayarlarına ve
+diktelerine dokunmaz.
 
-Ayarlar penceresinde iki anahtar istenir: **OpenAI** ve **OpenRouter**. Sesi
-yazıya çevirme ikisinden birinde çalışır (varsayılan `gpt-4o-transcribe`),
-temizleme her zaman OpenRouter'da (`google/gemini-3.5-flash-lite`), yani tek bir
-OpenRouter anahtarı ikisine de yeter. Boş bırakırsan `OPENAI_API_KEY` ve
+Sesi yazıya çevirme ve temizleme, ayarlar penceresinde ayrı ayrı sağlayıcı
+seçer; ikisi de varsayılan olarak burada, kendi modellerinle çalışır. Bulutu
+seçersen sesi yazıya çevirme **OpenAI**, **Groq** ya da **OpenRouter**'da
+(varsayılan `gpt-4o-transcribe`), temizleme OpenRouter'da
+(`google/gemini-3.5-flash-lite`) ya da kuruluysa Claude Code veya Codex'te
+çalışır. Anahtarları boş bırakırsan `OPENAI_API_KEY`, `GROQ_API_KEY` ve
 `OPENROUTER_API_KEY` kullanılır; anahtarlar `~/.config/dikte/config.json`
 içinde, izinler 600. Temizlemeyi tamamen kapatabilirsin, o zaman ham transkript
 yapıştırılır; modelin yanındaki kutudan düşünme seviyesini de seçebilirsin.
@@ -52,7 +57,7 @@ yapıştırılır; modelin yanındaki kutudan düşünme seviyesini de seçebili
 | Ne | Nasıl |
 | --- | --- |
 | Kaydı başlat / bitir | `Ctrl+Space`, ya da tepsi simgesine tıkla |
-| Kaydı iptal et | Tepsi menüsü → *Kaydı iptal et*, ya da `dikte cancel` |
+| Kaydı iptal et | `Ctrl+Alt+Space`, tepsi menüsü, ya da `dikte cancel` |
 | Ajana sesle komut ver | Tepsi menüsü → *Claude'a sor*, ya da `dikte ask` |
 | Toplantıyı başlat / bitir | Tepsi menüsü → *Toplantı kaydet*, ya da `dikte meeting` |
 | Ayarlar | Tepsi menüsü → *Ayarlar*, ya da `dikte settings` |
@@ -75,6 +80,12 @@ olmasını ister.
 
 ## Neler yapıyor
 
+- **Her şey varsayılan olarak bu makinede çalışır.** Sesi yazıya çevirme
+  whisper.cpp, temizleme llama.cpp üzerinde; ikisini de önceden kurman gerekmez:
+  ayarlar penceresi programı ve modeli indirir, sha256'sını doğrular,
+  checksum'suz yayınlanmış bir indirmeyi reddeder, sen dikte ettikçe sunucuyu
+  ayakta tutar. Derleme destekliyorsa ekran kartına CUDA, ROCm ya da Vulkan
+  üzerinden ulaşılır. Anahtar yok, hesap yok, makineden çıkan bir şey yok.
 - **Sessizlik API'ye gitmez.** Sessize yakın bir ses verildiğinde model boş dize
   döndürmez, bir cümle uydurur ("Altyazı M.K.", "Thanks for watching"). *O
   kaydın kendi* gürültü tabanının 10 dB üstüne en az 0,3 saniye çıkan bir şey
@@ -124,11 +135,11 @@ olmasını ister.
   silebilirsin.
 - **Türkçe ve İngilizce arayüz**, varsayılan olarak sistem dilini izler.
 
-## Global kısayol için bir kez oturum kapatmak gerekir
+## Global kısayollar için bir kez oturum kapatmak gerekir
 
 KWin `kglobalshortcutsrc` dosyasını yalnızca açılışta okur, yani `install.sh`'ın
-yazdığı kısayol oturumu yeniden açana kadar tetiklenmez. O zamana kadar Ayarlar →
-Kısayol → **yerleşik dinleyici** `/dev/input` üzerinden kombinasyonu kendisi
+yazdığı kısayollar oturumu yeniden açana kadar tetiklenmez. O zamana kadar Ayarlar →
+Kısayollar → **yerleşik dinleyici** `/dev/input` üzerinden kombinasyonu kendisi
 yakalar. Tek farkı: tuşu yutmaz, yani `Ctrl+Space` odaktaki uygulamaya da iletilir
 (bazı editörlerde otomatik tamamlama açılabilir). Dinleyici kullanıcının `input`
 grubunda olmasını gerektirir: `sudo usermod -aG input $USER`.
@@ -142,7 +153,10 @@ ipc.py            yerel sokette bir istek, bir cevap
 audio.py          PCM kaydı: diktede pw-record, toplantıda ffmpeg
 meeting.py        kanal ayırma, konuşmacı etiketi, temizleme, tutanak
 assistant.py      dikteyi Claude Code, Codex ya da OpenRouter'dan geçirme
-api.py            iki sağlayıcıda transkript + OpenRouter temizleme (yalnız stdlib)
+api.py            transkript ve temizleme istekleri (yalnız stdlib)
+cleanup.py        transkripti kim temizler: OpenRouter, burası, Claude ya da Codex
+ggml.py           whisper.cpp ve llama.cpp'yi indirip burada çalıştırma
+hub.py            GitHub ve Hugging Face'te bugün ne olduğu
 worker.py         transkript → temizleme → pano → yapıştırma
 vad.py            kayıtta gerçekten konuşma var mı kararı
 filetranscribe.py dosyadan transkript: ffmpeg, parçalama, zaman damgaları

@@ -56,7 +56,7 @@ TR = {
     "Start recording": "Kaydı başlat",
     "Stop and transcribe": "Kaydı bitir ve yaz",
     "Working…": "İşleniyor…",
-    "Cancel recording": "Kaydı iptal et",
+    "Discard the recording": "Kaydı iptal et",
     "Settings…": "Ayarlar…",
     "Restart": "Yeniden başlat",
     "Quit": "Çık",
@@ -140,6 +140,7 @@ TR = {
     "Cleanup rules": "Temizleme kuralları",
     "Audio file": "Ses dosyası",
     "Shortcut": "Kısayol",
+    "Shortcuts": "Kısayollar",
     "History": "Geçmiş",
     "Save": "Kaydet",
     "Saved successfully.": "Başarıyla kaydedildi.",
@@ -185,6 +186,7 @@ TR = {
     "Model": "Model",
     "Provider": "Sağlayıcı",
     "sk-… (falls back to OPENAI_API_KEY)": "sk-… (boşsa OPENAI_API_KEY kullanılır)",
+    "gsk_… (falls back to GROQ_API_KEY)": "gsk_… (boşsa GROQ_API_KEY kullanılır)",
     "sk-or-… (falls back to OPENROUTER_API_KEY)": "sk-or-… (boşsa OPENROUTER_API_KEY kullanılır)",
     "Test": "Test et",
     "Trying…": "Deneniyor…",
@@ -192,6 +194,18 @@ TR = {
     "Connection works. {count} audio models visible.":
         "Bağlantı tamam. {count} ses modeli görünüyor.",
     "Clean the transcript with a model": "Transkripti bir modelle temizle",
+    "OpenRouter is the quickest and the only one that needs nothing installed. "
+    "Claude Code and Codex clean up on the subscription you already have, "
+    "without a second key, and take a few seconds longer because each one opens "
+    "a session to do it.":
+        "En hızlısı OpenRouter'dır ve kurulu bir program istemeyen tek seçenektir. "
+        "Claude Code ile Codex, temizliği hâlihazırda ödediğin abonelik üzerinden "
+        "yapar, ikinci bir anahtar istemez; her biri bunun için bir oturum açtığından "
+        "birkaç saniye daha uzun sürer.",
+    "{binary} is not on your PATH, so cleanup would fail and the raw transcript "
+    "would be pasted. Install it, or pick another one above.":
+        "{binary} PATH'te değil; temizleme başarısız olur ve ham transkript "
+        "yapıştırılır. Kur ya da yukarıdan başka birini seç.",
     "Thinking": "Düşünme",
     "Model's own default": "Modelin kendi varsayılanı",
     "Off": "Kapalı",
@@ -289,6 +303,13 @@ TR = {
         "Global kısayol kurulu değil. Toplantı tepsi menüsünden de başlatılabilir.",
     "No global shortcut installed. The tray menu asks it too.":
         "Global kısayol kurulu değil. Tepsi menüsünden de soru sorulabilir.",
+    "No global shortcut installed. The tray menu discards it too.":
+        "Global kısayol kurulu değil. Kayıt tepsi menüsünden de iptal edilebilir.",
+    "Start and stop": "Başlat ve bitir",
+    "Throws the recording away without transcribing it. Works on a dictation "
+    "and on a command for the agent alike, whichever is running.":
+        "Kaydı yazıya dökmeden atar. Hangisi çalışıyorsa ona işler: dikteye de, "
+        "ajana verilen komuta da.",
     "Shortcut saved: {shortcut}": "Kısayol kaydedildi: {shortcut}",
     "Could not register the GNOME shortcut: {error}":
         "GNOME kısayolu kaydedilemedi: {error}",
@@ -396,6 +417,14 @@ TR = {
     "{service} answered with nothing.": "{service} boş cevap verdi.",
     "It was not allowed to use: {tools}": "Şunları kullanmasına izin yoktu: {tools}",
     "The model returned an empty reply.": "Model boş cevap döndürdü.",
+
+    # --- cleanup, when a CLI does it ----------------------------------------
+    "{binary} not found. Install it, or have OpenRouter clean up instead, "
+    "under Settings → API and models.":
+        "{binary} bulunamadı. Kur ya da Ayarlar → API ve modeller sekmesinden "
+        "temizliği OpenRouter'a bırak.",
+    "{service} did not finish within {seconds} seconds.":
+        "{service} {seconds} saniye içinde bitmedi.",
 
     # --- settings: the agent ------------------------------------------------
     "Agent": "Ajan",

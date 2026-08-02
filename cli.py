@@ -25,6 +25,7 @@ from PyQt6.QtCore import QCoreApplication, QTimer
 import api
 import assistant
 import audio
+import cleanup
 import config as cfg
 import filetranscribe
 import hotkey
@@ -43,14 +44,6 @@ GUI_VERBS = {"", "settings", "toggle", "ask", "meeting"}
 # it is already in the state that was asked for.
 IDEMPOTENT_VERBS = {"cancel", "stop", "quit", "restart", "ask-cancel",
                     "ask-reset", "meeting-cancel"}
-
-# Which desktop entry, name and setting belong to each of the three shortcuts.
-SHORTCUTS = {
-    "toggle": (hotkey.DESKTOP_ID, "Dikte: start/stop recording", "shortcut"),
-    "ask": (hotkey.ASK_DESKTOP_ID, "Dikte: ask Claude Code", "assistant_shortcut"),
-    "meeting": (hotkey.MEETING_DESKTOP_ID, "Dikte: start/end a meeting recording",
-                "meeting_shortcut"),
-}
 
 _app = None
 
@@ -662,12 +655,14 @@ def cmd_devices(opts):
 
 def cmd_models(opts):
     conf = cfg.Config()
+    who = cfg.TRANSCRIBERS[opts.provider]
     try:
-        if opts.provider == "openai":
-            models = api.openai_models(conf.openai_key(), conf["openai_base_url"])
-        else:
+        if opts.provider == "openrouter":
             models = api.openrouter_models(conf.openrouter_key(),
                                            transcription=opts.transcription)
+        else:
+            models = api.openai_models(conf.api_key(who.key), conf[who.url],
+                                       who.service)
     except api.ApiError as exc:
         return fail(opts, exc)
     return out(opts, {"ok": True, "provider": opts.provider, "models": models},
@@ -677,19 +672,21 @@ def cmd_models(opts):
 def cmd_test_key(opts):
     conf = cfg.Config()
     results = {}
-    if opts.which in ("openai", "all"):
+    for name, who in cfg.TRANSCRIBERS.items():
+        if opts.which not in (name, "all"):
+            continue
         try:
-            count = len(api.openai_models(conf.openai_key(), conf["openai_base_url"]))
-            results["openai"] = {"ok": True,
-                                 "message": f"connection works, {count} models visible"}
+            if name == "openrouter":
+                # The one key that also pays for cleanup, so it reports credit
+                # rather than a model count.
+                message = api.openrouter_key_status(conf.openrouter_key())
+            else:
+                count = len(api.openai_models(conf.api_key(who.key), conf[who.url],
+                                              who.service))
+                message = f"connection works, {count} models visible"
+            results[name] = {"ok": True, "message": message}
         except api.ApiError as exc:
-            results["openai"] = {"ok": False, "message": str(exc)}
-    if opts.which in ("openrouter", "all"):
-        try:
-            results["openrouter"] = {"ok": True,
-                                     "message": api.openrouter_key_status(conf.openrouter_key())}
-        except api.ApiError as exc:
-            results["openrouter"] = {"ok": False, "message": str(exc)}
+            results[name] = {"ok": False, "message": str(exc)}
     everything_ok = all(item["ok"] for item in results.values())
     lines = [f"{'✓' if item['ok'] else '✗'} {name}: {item['message']}"
              for name, item in results.items()]
@@ -701,9 +698,9 @@ def cmd_shortcut(opts):
     conf = cfg.Config()
     if opts.shortcut == "status":
         rows = {}
-        for name, (desktop_id, _label, key) in SHORTCUTS.items():
-            rows[name] = {"registered": hotkey.shortcut_status(desktop_id),
-                          "configured": conf[key]}
+        for name, spec in hotkey.SHORTCUTS.items():
+            rows[name] = {"registered": hotkey.shortcut_status(spec.desktop_id),
+                          "configured": conf[spec.setting]}
         lines = [f"{name:8} {row['registered'] or '(not installed)':16} "
                  f"setting: {row['configured'] or '(none)'}"
                  for name, row in rows.items()]
@@ -711,28 +708,29 @@ def cmd_shortcut(opts):
         return out(opts, {"ok": True, "shortcuts": rows,
                           "listener": conf["evdev_hotkey"]}, "\n".join(lines))
 
-    desktop_id, label, key = SHORTCUTS[opts.which]
+    spec = hotkey.SHORTCUTS[opts.which]
     if opts.shortcut == "remove":
-        hotkey.remove_shortcut(desktop_id)
+        hotkey.remove_shortcut(spec.desktop_id)
         return out(opts, {"ok": True, "removed": opts.which},
                    f"Removed the {opts.which} shortcut.")
 
-    combo = (opts.combo or conf[key] or ("Ctrl+Space" if opts.which == "toggle" else "")).strip()
+    combo = (opts.combo or conf[spec.setting] or spec.fallback).strip()
     if not combo:
         return fail(opts, "no combination given and none stored; pass --combo", 2)
     if not hotkey.valid_shortcut(combo):
         return fail(opts, f"cannot parse that combination: {combo}", 2)
-    clashes = hotkey.conflicting_shortcuts(combo, desktop_id)
+    clashes = hotkey.conflicting_shortcuts(combo, spec.desktop_id)
     if clashes and not opts.force:
         return fail(opts, f"{combo} is also used by: {', '.join(clashes[:6])}. "
                           "Pass --force to install it anyway.", 1, conflicts=clashes)
 
     ok, message = hotkey.install_shortcut(
-        combo, ipc.command_for(opts.which), name=label, desktop_id=desktop_id,
+        combo, ipc.command_for(spec.verb), name=spec.name,
+        desktop_id=spec.desktop_id,
     )
     if not ok:
         return fail(opts, message)
-    conf[key] = combo
+    conf[spec.setting] = combo
     try:
         conf.save()
     except OSError as exc:
@@ -767,16 +765,18 @@ def cmd_status(opts):
 def cmd_doctor(opts):
     """What the settings window checks behind its buttons, in one pass."""
     conf = cfg.Config()
-    programs = {name: shutil.which(name) or ""
-                for name in ("pw-record", "wl-copy", "ydotool", "ffmpeg",
-                             "pactl", "kwriteconfig6",
-                             assistant.executable(assistant.provider(conf)) or "claude")}
+    wanted = ["pw-record", "wl-copy", "ydotool", "ffmpeg", "pactl", "kwriteconfig6",
+              assistant.executable(assistant.provider(conf)) or "claude",
+              cleanup.executable(cleanup.provider(conf))]
+    programs = {name: shutil.which(name) or "" for name in wanted if name}
     target = conf.transcribe_target()
+    cleaner = cleanup.provider(conf)
     checks = {
         "programs": programs,
         "transcription": {"provider": target.provider, "model": target.model,
                           "key": bool(target.api_key)},
-        "cleanup": {"enabled": conf["cleanup_enabled"], "model": conf["cleanup_model"],
+        "cleanup": {"enabled": conf["cleanup_enabled"], "provider": cleaner,
+                    "model": cleanup.model(conf),
                     "key": bool(conf.openrouter_key())},
         "agent": {"provider": assistant.provider(conf),
                   "directory": assistant.working_dir(conf)},
@@ -787,8 +787,11 @@ def cmd_doctor(opts):
     lines += [
         f"{'✓' if target.api_key else '✗'} {target.service} key, transcribing on "
         f"{target.model}",
-        f"{'✓' if conf.openrouter_key() else '✗'} OpenRouter key, cleaning up on "
-        f"{conf['cleanup_model']}",
+        # Cleanup on a CLI needs no key, so what is checked is the program.
+        (f"{'✓' if conf.openrouter_key() else '✗'} OpenRouter key, cleaning up on "
+         f"{conf['cleanup_model']}") if cleaner == "openrouter" else
+        (f"{'✓' if programs[cleanup.executable(cleaner)] else '✗'} "
+         f"{cleanup.executable(cleaner)}, cleaning up on {cleanup.model(conf)}"),
         f"{'✓' if checks['running'] else '·'} application "
         + ("running" if checks["running"] else "not running"),
     ]
@@ -986,30 +989,31 @@ def build_parser():
     # --- the machine ------------------------------------------------------
     leaf(subs, "devices", "microphones and monitors").set_defaults(func=cmd_devices)
     models = leaf(subs, "models", "model ids a provider offers")
-    models.add_argument("--provider", choices=("openrouter", "openai"),
+    models.add_argument("--provider", choices=tuple(cfg.TRANSCRIBERS),
                         default="openrouter")
     models.add_argument("--transcription", action="store_true",
                         help="only the speech-to-text ones")
     models.set_defaults(func=cmd_models)
     test = leaf(subs, "test-key", "check the API keys")
     test.add_argument("which", nargs="?", default="all",
-                      choices=("all", "openai", "openrouter"))
+                      choices=("all", *cfg.TRANSCRIBERS))
     test.set_defaults(func=cmd_test_key)
     leaf(subs, "doctor", "keys, programs, and what is missing").set_defaults(func=cmd_doctor)
 
-    shortcut = leaf(subs, "shortcut", "the KDE global shortcuts")
+    shortcut = leaf(subs, "shortcut", "the desktop's global shortcuts")
     inner = shortcut.add_subparsers(dest="shortcut", metavar="")
     shortcut.set_defaults(func=_needs_subcommand(shortcut))
     leaf(inner, "status", "what is registered").set_defaults(func=cmd_shortcut)
     install = leaf(inner, "install", "register one")
     install.add_argument("which", nargs="?", default="toggle",
-                         choices=tuple(SHORTCUTS))
+                         choices=tuple(hotkey.SHORTCUTS))
     install.add_argument("--combo", help="e.g. Ctrl+Alt+Space")
     install.add_argument("--force", action="store_true",
                          help="install it even if something else uses it")
     install.set_defaults(func=cmd_shortcut)
     remove = leaf(inner, "remove", "unregister one")
-    remove.add_argument("which", nargs="?", default="toggle", choices=tuple(SHORTCUTS))
+    remove.add_argument("which", nargs="?", default="toggle",
+                        choices=tuple(hotkey.SHORTCUTS))
     remove.set_defaults(func=cmd_shortcut)
 
     # --- the application --------------------------------------------------

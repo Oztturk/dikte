@@ -25,6 +25,7 @@ import wave
 from PyQt6.QtCore import QObject, pyqtSignal
 
 import api
+import cleanup
 import config as cfg
 import filetranscribe
 import vad
@@ -208,14 +209,7 @@ class MeetingPipeline(QObject):
             if len(blocks) > 1:
                 self._say(t("Cleaning up {index}/{count}…",
                             index=index, count=len(blocks)))
-            out.append(api.cleanup(
-                block,
-                conf.openrouter_key(),
-                conf["cleanup_model"],
-                prompt,
-                reasoning=conf["cleanup_reasoning"],
-                base_url=conf["openrouter_base_url"],
-            ))
+            out.append(cleanup.run(block, conf, prompt, timeout=600))
         return "\n".join(out)
 
     def _write(self, doc_path, minutes, transcript, entry):

@@ -13,7 +13,9 @@ from unittest import mock
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+import cleanup
 import config as cfg
+import hotkey
 import overlay as overlay_module
 import paste
 import settings_ui
@@ -39,13 +41,27 @@ CHANGED = {
     "filter_hallucinations": False,
     "keep_audio": True,
     "openai_api_key": "sk-test-key",
+    "groq_api_key": "gsk-test-key",
     "openrouter_api_key": "sk-or-test-key",
     "transcribe_provider": "openrouter",
     "transcribe_model": "whisper-1",
+    "groq_transcribe_model": "whisper-large-v3",
     "openrouter_transcribe_model": "openai/whisper-1",
     "cleanup_enabled": False,
+    "cleanup_provider": "local",
     "cleanup_model": "some/other-model",
+    "cleanup_claude_model": "opus",
+    "cleanup_codex_model": "gpt-5",
     "cleanup_reasoning": "high",
+    "local_model": "ggml-small.bin",
+    "local_gpu": False,
+    "local_preload": False,
+    "local_threads": 6,
+    "local_llm_model": "gemma-3-4b-it-Q4_K_M.gguf",
+    "local_llm_repo": "ggml-org/gemma-4-E2B-it-GGUF",
+    "local_llm_gpu": False,
+    "local_llm_preload": True,
+    "local_llm_reasoning": "low",
     "cleanup_prompt": "Only fix the punctuation.",
     "file_cleanup_prompt": "Keep the stamps where they are.",
     "transcribe_prompt": "Paraşüt, OpenFrame",
@@ -77,6 +93,7 @@ CHANGED = {
     "file_timestamps": True,
     "file_cleanup": False,
     "shortcut": "Ctrl+Alt+Space",
+    "cancel_shortcut": "Meta+Shift+Space",
     "evdev_hotkey": True,
     "history_limit": 50,
 }
@@ -105,7 +122,7 @@ class Settings(DikteTest):
                                             self.path("kglobalshortcutsrc")))
 
     def window(self, conf):
-        window = settings_ui.SettingsWindow(conf, "dikte toggle")
+        window = settings_ui.SettingsWindow(conf)
         self.addCleanup(window.deleteLater)
         self.addCleanup(window.close)
         return window
@@ -133,6 +150,20 @@ class Settings(DikteTest):
             with self.subTest(key=key):
                 self.assertEqual(stored[key], value)
 
+    def test_the_model_box_on_screen_belongs_to_whoever_cleans_up(self):
+        """An OpenRouter id and a Claude alias are not the same field."""
+        window = self.window(cfg.Config())
+        boxes = {"openrouter": window.cleanup_model_row,
+                 "claude": window.cleanup_claude_model,
+                 "codex": window.cleanup_codex_model}
+        for provider, box in boxes.items():
+            with self.subTest(provider=provider):
+                window._select_data(window.cleanup_provider, provider)
+                shown = [name for name, other in boxes.items()
+                         if not other.isHidden()]
+                self.assertEqual(shown, [provider])
+                self.assertFalse(box.isHidden())
+
     def test_the_settings_the_window_does_not_show_are_left_alone(self):
         """A tab nobody wrote must not reset what the command line set."""
         self.write_config({"silence_db": -42.0, "speech_margin_db": 15.0,
@@ -142,6 +173,37 @@ class Settings(DikteTest):
         stored = self.read_config_file()
         self.assertEqual(stored["speech_margin_db"], 15.0)
         self.assertEqual(stored["openrouter_base_url"], "http://localhost:1234/v1")
+
+    def test_every_global_shortcut_has_a_row_of_its_own(self):
+        window = self.window(cfg.Config())
+        self.assertEqual(set(window._shortcut_rows), set(hotkey.SHORTCUTS))
+
+    def test_emptying_a_shortcut_turns_it_off_but_not_the_toggle(self):
+        """The application is unusable without the toggle, so that one box
+        falls back. The rest stay empty, which is how they are switched off."""
+        conf = cfg.Config()
+        window = self.window(conf)
+        for box, _status, _missing in window._shortcut_rows.values():
+            box.setCurrentText("")
+        window._save()
+        self.assertEqual(conf["shortcut"], "Ctrl+Space")
+        self.assertEqual(conf["cancel_shortcut"], "")
+        self.assertEqual(conf["assistant_shortcut"], "")
+        self.assertEqual(conf["meeting_shortcut"], "")
+
+    def test_installing_the_discard_key_writes_its_own_entry(self):
+        conf = cfg.Config()
+        window = self.window(conf)
+        window._shortcut_rows["cancel"][0].setCurrentText("Meta+Shift+Space")
+        with mock.patch.object(settings_ui.hotkey, "install_shortcut",
+                               return_value=(True, "saved")) as install:
+            window._install_shortcut("cancel")
+        combo, command = install.call_args.args
+        self.assertEqual(combo, "Meta+Shift+Space")
+        self.assertTrue(command.endswith(" cancel"))
+        self.assertEqual(install.call_args.kwargs["desktop_id"],
+                         hotkey.CANCEL_DESKTOP_ID)
+        self.assertEqual(conf["cancel_shortcut"], "Meta+Shift+Space")
 
     def test_a_prompt_left_at_its_default_is_stored_as_empty(self):
         """So that switching the interface language switches the prompt too."""
@@ -154,14 +216,44 @@ class Settings(DikteTest):
     def test_each_provider_keeps_its_own_transcription_model(self):
         self.write_config({"transcribe_provider": "openai",
                            "transcribe_model": "gpt-4o-transcribe",
+                           "groq_transcribe_model": "whisper-large-v3",
                            "openrouter_transcribe_model": "openai/whisper-1"})
         conf = cfg.Config()
         window = self.window(conf)
-        window.transcribe_provider.setCurrentIndex(
-            window.transcribe_provider.findData("openrouter"))
+        for provider in ("groq", "openrouter"):
+            window.transcribe_provider.setCurrentIndex(
+                window.transcribe_provider.findData(provider))
         window._save()
         self.assertEqual(conf["transcribe_provider"], "openrouter")
         self.assertEqual(conf["transcribe_model"], "gpt-4o-transcribe")
+        self.assertEqual(conf["groq_transcribe_model"], "whisper-large-v3")
+
+    def test_the_provider_box_offers_every_provider_config_knows(self):
+        window = self.window(cfg.Config())
+        offered = [window.transcribe_provider.itemData(i)
+                   for i in range(window.transcribe_provider.count())]
+        self.assertEqual(offered, ["local"] + list(cfg.TRANSCRIBERS))
+
+    def test_the_cleanup_box_offers_everyone_cleanup_py_dispatches_to(self):
+        window = self.window(cfg.Config())
+        offered = [window.cleanup_provider.itemData(i)
+                   for i in range(window.cleanup_provider.count())]
+        self.assertEqual(sorted(offered), sorted(cleanup.PROVIDERS))
+
+    def test_the_answer_to_a_test_lands_under_the_key_it_was_asked_about(self):
+        """One signal serves all three buttons, so it carries which one asked."""
+        window = self.window(cfg.Config())
+        window._on_test_done("groq", True, "it works")
+        button, answer = window._testers["groq"]
+        self.assertEqual(answer.text(), "✓ it works")
+        self.assertTrue(button.isEnabled())
+        self.assertEqual(window._testers["openai"][1].text(), "")
+
+    def test_a_key_lands_in_the_field_of_its_own_provider(self):
+        self.write_config({"groq_api_key": "gsk-mine"})
+        window = self.window(cfg.Config())
+        self.assertEqual(window.groq_key.text(), "gsk-mine")
+        self.assertEqual(window.openai_key.text(), "")
 
     def test_saving_applies_the_lowered_history_limit_at_once(self):
         for index in range(10):
@@ -182,6 +274,43 @@ class Settings(DikteTest):
         self.write_config({"ui_language": "tr"})
         window = self.window(cfg.Config())
         self.assertEqual(window.windowTitle(), "Dikte Ayarları")
+
+    def test_the_audio_file_switches_are_kept_without_the_save_button(self):
+        """They are ticked to transcribe one file, not to fill in a form."""
+        self.write_config({"file_timestamps": False, "file_cleanup": True})
+        window = self.window(cfg.Config())
+        window.file_timestamps.setChecked(True)
+        window.file_cleanup.setChecked(False)
+        stored = self.read_config_file()
+        self.assertTrue(stored["file_timestamps"])
+        self.assertFalse(stored["file_cleanup"])
+
+    def test_loading_the_audio_file_tab_is_not_taken_for_a_change(self):
+        self.write_config({"file_timestamps": True, "file_cleanup": False})
+        conf = cfg.Config()
+        with mock.patch.object(conf, "save") as save:
+            window = self.window(conf)
+        save.assert_not_called()
+        self.assertTrue(window.file_timestamps.isChecked())
+        self.assertFalse(window.file_cleanup.isChecked())
+
+    def test_the_run_button_comes_back_when_the_stop_lands(self):
+        """In whichever language, since the worker says so through t() too."""
+        for language in ("auto", "tr"):
+            with self.subTest(language=language):
+                self.write_config({"ui_language": language})
+                window = self.window(cfg.Config())
+                window.file_run.setEnabled(False)
+                window._on_file_progress(settings_ui.t("Stopped."))
+                self.assertTrue(window.file_run.isEnabled())
+
+    def test_stop_leaves_nothing_to_press_twice(self):
+        window = self.window(cfg.Config())
+        with mock.patch.object(window.transcriber, "stop") as stop:
+            window.file_stop.setEnabled(True)
+            window._stop_file()
+        stop.assert_called_once_with()
+        self.assertFalse(window.file_stop.isEnabled())
 
 
 class MacSettings(Settings):
@@ -296,3 +425,78 @@ class Overlay(DikteTest):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LocalModels(DikteTest):
+    """The download boxes, without a network and without either program."""
+
+    def window(self, conf):
+        window = settings_ui.SettingsWindow(conf)
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(window.close)
+        return window
+
+    def test_it_opens_where_the_missing_model_is_fixed(self):
+        # Nothing can transcribe on a fresh install, which is why this window
+        # was opened at all.
+        window = self.window(cfg.Config())
+        self.assertEqual(window.tabs.currentIndex(), window.api_tab_index)
+
+    def test_it_opens_where_it_was_left_when_everything_works(self):
+        conf = self.config(transcribe_provider="openai", openai_api_key="sk-test")
+        self.assertEqual(self.window(conf).tabs.currentIndex(), 0)
+
+    def test_a_model_that_is_not_here_yet_survives_a_save(self):
+        # The box is filled from what is on this disk, so a model that was
+        # deleted from underneath is not in the list. Dropping it on save would
+        # quietly empty the setting instead of asking for the download again.
+        conf = self.config(local_model="ggml-large-v3-turbo-q5_0.bin")
+        with mock.patch.object(QMessageBox, "information"):
+            self.window(conf)._save()
+        self.assertEqual(conf["local_model"], "ggml-large-v3-turbo-q5_0.bin")
+
+    def test_nothing_is_fetched_for_a_window_nobody_opened(self):
+        # DikteTest closes the network, so a request would fail the test. The
+        # lists are asked for when the box is shown, not when it is built.
+        window = self.window(cfg.Config())
+        self.assertTrue(window.local_whisper._pending)
+
+    def test_a_model_bigger_than_two_gigabytes_counts_up_rather_than_down(self):
+        # Qt's int is C++'s 32-bit one, and a 2.3 GB model is more than fits in
+        # it: the count came out the far side negative, at "-1%".
+        box = self.window(cfg.Config()).local_llm
+        box._downloading = True
+        box._report(1_048_576, 2_489_757_856)
+        _app.processEvents()
+        self.assertIn("2.3 GB", box.status.text())
+        self.assertNotIn("-", box.status.text())
+
+    def test_a_long_model_name_is_not_cut_in_half(self):
+        # The list under a combo box takes the box's width and elides what does
+        # not fit, in the middle: "ggml-org/Qwen....7B-Base-GGUF".
+        box = self.window(cfg.Config()).local_llm
+        box.repo.addItem("ggml-org/a-model-with-a-name-that-runs-on-and-on-GGUF")
+        box._fit_popup(box.repo)
+        view = box.repo.view()
+        self.assertEqual(view.textElideMode(), settings_ui.Qt.TextElideMode.ElideNone)
+        widest = max(box.repo.fontMetrics().horizontalAdvance(box.repo.itemText(row))
+                     for row in range(box.repo.count()))
+        self.assertGreaterEqual(view.minimumWidth(), widest)
+
+    def test_only_the_chosen_transcriber_is_on_screen(self):
+        window = self.window(self.config(transcribe_provider="openai"))
+        self.assertTrue(window.stt_form.isRowVisible(window.transcribe_model_row))
+        self.assertFalse(window.stt_form.isRowVisible(window.local_whisper))
+        window._select_data(window.transcribe_provider, "local")
+        self.assertFalse(window.stt_form.isRowVisible(window.transcribe_model_row))
+        self.assertTrue(window.stt_form.isRowVisible(window.local_whisper))
+
+    def test_only_the_chosen_cleaner_is_on_screen(self):
+        window = self.window(cfg.Config())
+        self.assertTrue(window.cleanup_form.isRowVisible(window.cleanup_model_row))
+        self.assertFalse(window.cleanup_form.isRowVisible(window.local_llm))
+        window._select_data(window.cleanup_provider, "local")
+        self.assertTrue(window.cleanup_form.isRowVisible(window.local_llm))
+        self.assertFalse(window.cleanup_form.isRowVisible(window.cleanup_model_row))
+        # Its own thinking box, because the two default to opposite things.
+        self.assertFalse(window.cleanup_form.isRowVisible(window.cleanup_reasoning))

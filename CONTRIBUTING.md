@@ -62,7 +62,7 @@ inside the chooser and read it there every time: a constant settled at import is
 one no test can stand somewhere else.
 
 The tests are split along the same line, and almost none of them are skipped.
-697 of the 737 run on any machine, including every line of the Wayland, X11 and
+892 of the 935 run on any machine, including every line of the Wayland, X11 and
 macOS backends: the programs are faked at `shutil.which`, the frameworks at the
 one function that loads them. A test class says which system it is standing on
 rather than avoiding the question:
@@ -78,17 +78,17 @@ to a chooser cannot quietly break the platform nobody is sitting at. What the
 systems owe in common is written once as a contract class and subclassed by each
 of them.
 
-The 40 that do carry `@linux_only` are the ones that would need the real thing:
+The 43 that do carry `@linux_only` are the ones that would need the real thing:
 the `/dev/input` listener, KDE's shortcut file, GNOME's gsettings. Mark a test
 that way only when faking it would leave nothing to test. A test that quietly
 stops running on the platform you are porting to protects nothing.
 
 ## What a pull request should carry
 
-A change to behaviour comes with a test for it. Adding a provider means a test
-that the request goes to the right URL with the right fields; adding a platform
-means a test for whatever the parsing of its device list, clipboard or shortcuts
-looks like. Adding a setting means both halves of `settings_ui.py`: the round
+A change to behaviour comes with a test for it. Adding a provider means a row in
+`config.TRANSCRIBERS` and a test that the request goes to the right URL with the
+right fields; adding a platform means a test for whatever the parsing of its
+device list, clipboard or shortcuts looks like. Adding a setting means both halves of `settings_ui.py`: the round
 trip in `tests/test_ui.py` is what catches only one of them being written.
 
 Match the surrounding code: it is plain Python with no framework, comments

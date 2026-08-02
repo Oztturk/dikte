@@ -9,6 +9,7 @@ there the listener is not a fallback but the whole mechanism.
 """
 
 import ast
+import collections
 import ctypes
 import ctypes.util
 import glob
@@ -27,16 +28,33 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from i18n import t
 
 DESKTOP_ID = "dikte-toggle.desktop"
+CANCEL_DESKTOP_ID = "dikte-cancel.desktop"
 MEETING_DESKTOP_ID = "dikte-meeting.desktop"
 ASK_DESKTOP_ID = "dikte-ask.desktop"
-# The name each binding is started under, and the entry it is installed as.
-DESKTOP_IDS = {"toggle": DESKTOP_ID, "meeting": MEETING_DESKTOP_ID,
-               "ask": ASK_DESKTOP_ID}
 APPLICATIONS_DIR = pathlib.Path.home() / ".local/share/applications"
 DESKTOP_FILE = APPLICATIONS_DIR / DESKTOP_ID
 SHORTCUTS_FILE = pathlib.Path.home() / ".config/kglobalshortcutsrc"
 GNOME_MEDIA_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys"
 GNOME_BINDING_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding"
+
+Shortcut = collections.namedtuple("Shortcut", "verb desktop_id name setting fallback")
+
+# Every global shortcut in one place, because there are four of them and the
+# command line, the settings window and the installer each used to carry their
+# own copy of the list. `fallback` is what to register when the setting is
+# empty: only the toggle has one, since it is the key the application is
+# unusable without.
+SHORTCUTS = {
+    "toggle": Shortcut("toggle", DESKTOP_ID, "Dikte: start/stop recording",
+                       "shortcut", "Ctrl+Space"),
+    "cancel": Shortcut("cancel", CANCEL_DESKTOP_ID, "Dikte: discard the recording",
+                       "cancel_shortcut", ""),
+    "ask": Shortcut("ask", ASK_DESKTOP_ID, "Dikte: ask Claude Code",
+                    "assistant_shortcut", ""),
+    "meeting": Shortcut("meeting", MEETING_DESKTOP_ID,
+                        "Dikte: start/end a meeting recording",
+                        "meeting_shortcut", ""),
+}
 
 # --- evdev key codes (linux/input-event-codes.h) --------------------------
 
@@ -318,9 +336,9 @@ class CarbonHotkey(QObject):
                 continue
             self._registrations.append(reference)
             self._names[identifier] = name
-            desktop_id = DESKTOP_IDS.get(name)
-            if desktop_id:
-                _REGISTERED[desktop_id] = shortcut
+            spec = SHORTCUTS.get(name)
+            if spec:
+                _REGISTERED[spec.desktop_id] = shortcut
         return bool(self._registrations)
 
     def stop(self):
@@ -642,14 +660,18 @@ def remove_kde_shortcut(desktop_id=DESKTOP_ID):
         (APPLICATIONS_DIR / desktop_id).unlink(missing_ok=True)
     except OSError:
         pass
-    try:
-        subprocess.run(
-            ["kwriteconfig6", "--notify", "--file", "kglobalshortcutsrc",
-             "--group", "services", "--group", desktop_id, "--key", "_launch", "--delete"],
-            capture_output=True, timeout=10,
-        )
-    except (subprocess.SubprocessError, OSError):
-        pass
+    # kwriteconfig6 deletes keys rather than groups, so both of the ones KDE
+    # keeps in there go and the empty group is left behind harmlessly.
+    for key in ("_launch", "_k_friendly_name"):
+        try:
+            subprocess.run(
+                ["kwriteconfig6", "--notify", "--file", "kglobalshortcutsrc",
+                 "--group", "services", "--group", desktop_id,
+                 "--key", key, "--delete"],
+                capture_output=True, timeout=10,
+            )
+        except (subprocess.SubprocessError, OSError):
+            pass
 
 
 def kde_shortcut_status(desktop_id=DESKTOP_ID):

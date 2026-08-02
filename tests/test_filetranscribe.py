@@ -7,6 +7,7 @@ made up a stamp nobody recorded.
 """
 
 import contextlib
+import time
 import unittest
 import wave
 from unittest import mock
@@ -170,7 +171,7 @@ class Transcriber(DikteTest):
         worker.failed.connect(failures.append)
         worker.progress.connect(progress.append)
 
-        def to_wav(path, workdir):
+        def to_wav(path, workdir, aborter=None):
             return make_wav(self.path("converted.wav"), tone(1.0))
 
         with mock.patch.object(ft, "_to_wav", side_effect=to_wav), \
@@ -224,6 +225,40 @@ class Transcriber(DikteTest):
     def test_empty_text_is_not_sent_to_cleanup(self):
         _, _, _, cleanup_call = self.run_chain(cleanup=True, transcript="")
         cleanup_call.assert_not_called()
+
+    def test_a_stopped_run_is_not_a_failure(self):
+        def stopped(*args, **kwargs):
+            raise api.Aborted
+        done, failures, progress, _ = self.run_chain(fail=stopped)
+        self.assertEqual(failures, [])
+        self.assertEqual(done, [])
+        self.assertEqual(progress[-1], "Stopped.")
+
+    def test_the_request_is_handed_the_stop_to_watch(self):
+        worker = ft.FileTranscriber(self.conf)
+        with mock.patch.object(ft, "_to_wav", side_effect=lambda *a: self.source), \
+                mock.patch.object(ft.shutil, "which", return_value="/usr/bin/ffmpeg"), \
+                mock.patch.object(api, "transcribe", return_value="text") as call:
+            worker._work(self.source, False, False)
+        self.assertIs(call.call_args.kwargs["aborter"], worker._abort)
+
+    def test_stopping_a_local_run_stops_the_model_with_it(self):
+        """Closing the socket is nothing to a process of ours: it would grind on
+        to the end of the chunk with nobody left to hand the answer to."""
+        worker = ft.FileTranscriber(self.conf)
+        worker._local = mock.Mock()
+        worker.stop()
+        self.assertTrue(worker._abort.aborted)
+        for _ in range(100):
+            if worker._local.stop.called:
+                break
+            time.sleep(0.01)
+        worker._local.stop.assert_called_once_with()
+
+    def test_a_run_that_is_over_leaves_the_model_alone(self):
+        worker = ft.FileTranscriber(self.conf)
+        worker.stop()
+        self.assertTrue(worker._abort.aborted)
 
     def test_a_second_start_while_one_is_running_is_ignored(self):
         worker = ft.FileTranscriber(self.conf)

@@ -170,6 +170,7 @@ class MeetingPipeline(QObject):
             chunk_dir = os.path.join(workdir, speaker)
             os.makedirs(chunk_dir, exist_ok=True)
             chunks = filetranscribe.split_wav(path, chunk_dir)
+            heard = []
             for index, (chunk_path, offset) in enumerate(chunks, start=1):
                 self._check()
                 self._say(t("Transcribing {side}: {index}/{count}…",
@@ -178,12 +179,15 @@ class MeetingPipeline(QObject):
                 # would cost money to be told so, and can invent a sentence.
                 if self._silent(chunk_path):
                     continue
-                segments.extend(
-                    (start + offset, end + offset, text, speaker)
+                # The chunks overlap, so what the cut fell in the middle of is
+                # in two of them; stitch keeps the one that heard it whole.
+                heard = filetranscribe.stitch(heard, [
+                    (start + offset, end + offset, text)
                     for start, end, text in api.transcribe_segments(
                         target, chunk_path, language=language, prompt=hint
                     )
-                )
+                ])
+            segments.extend((start, end, text, speaker) for start, end, text in heard)
         if not segments:
             raise api.ApiError(t("Neither side of the recording had any speech in it."))
 

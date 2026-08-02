@@ -1,8 +1,15 @@
 """Transcribe an existing audio/video file with the same models.
 
-ffmpeg converts whatever comes in to 16 kHz mono WAV; long files are cut into
-chunks that stay under the API's size limit, then stitched back together with
-their timestamps shifted into place.
+ffmpeg converts whatever comes in to 16 kHz mono WAV, and for a hosted API to
+mp3 on top of that. The upload limit is the only reason a file is ever cut up,
+and uncompressed audio reaches it after ten minutes where mp3 takes an hour.
+
+That is worth the encoder, because a cut is not free. Whisper hears in thirty
+second windows and decides for itself where one cue ends and the next begins; a
+chunk that starts in the middle of a sentence can come back as one cue per
+window, twenty seconds of text at a time, for the whole rest of the chunk. So
+the file is cut as rarely as the limit allows, what is cut overlaps, and
+stitch() drops the half that was heard twice.
 """
 
 import contextlib
@@ -21,7 +28,10 @@ import cleanup
 import ggml
 from i18n import t
 
-CHUNK_SECONDS = 600          # 10 min ≈ 19 MB at 16 kHz mono s16
+UPLOAD_LIMIT = 24 * 1024 * 1024  # the APIs take 25 MB; leave the form its room
+MP3_BITRATE = "48k"          # mono speech at 16 kHz: whisper hears nothing less
+OVERLAP_SECONDS = 30         # a whisper window: how far back a chunk starts
+WAV_CHUNK_SECONDS = 600      # 19 MB, for the caller that uploads the WAV itself
 CLEANUP_CHUNK_CHARS = 12000  # keep each cleanup call comfortably small
 RATE = 16000
 MIN_SUBTITLE_SECONDS = 1.5   # how long a cue with no end time of its own stays up
@@ -88,21 +98,23 @@ class FileTranscriber(QObject):
             wav_path = _to_wav(path, workdir, self._abort)
             self._check()
 
-            chunks = split_wav(wav_path, workdir)
+            target = conf.transcribe_target()
+            self._local = ggml.whisper if target.provider == "local" else None
+            chunks = self._chunks(wav_path, workdir, target, timestamps)
             if len(chunks) > 1:
                 self.progress.emit(t("Splitting into {count} chunks…", count=len(chunks)))
 
-            target = conf.transcribe_target()
-            self._local = ggml.whisper if target.provider == "local" else None
             pieces = []
             segments = []
             for index, (chunk_path, offset) in enumerate(chunks, start=1):
                 self._check()
                 self.progress.emit(
-                    t("Transcribing chunk {index}/{count}…", index=index, count=len(chunks))
+                    t("Transcribing chunk {index}/{count}…",
+                      index=index, count=len(chunks))
+                    if len(chunks) > 1 else t("Transcribing…")
                 )
                 if timestamps:
-                    segments.extend(
+                    segments = stitch(segments, [
                         (start + offset, end + offset, line)
                         for start, end, line in api.transcribe_segments(
                             target,
@@ -111,9 +123,7 @@ class FileTranscriber(QObject):
                             prompt=conf["transcribe_prompt"],
                             aborter=self._abort,
                         )
-                    )
-                    pieces = [f"[{format_timestamp(start)}] {line}"
-                              for start, _, line in segments]
+                    ])
                 else:
                     pieces.append(api.transcribe(
                         target,
@@ -123,6 +133,9 @@ class FileTranscriber(QObject):
                         aborter=self._abort,
                     ))
 
+            if timestamps:
+                pieces = [f"[{format_timestamp(start)}] {line}"
+                          for start, _, line in segments]
             text = "\n".join(pieces) if timestamps else " ".join(pieces)
 
             if do_cleanup and text:
@@ -140,6 +153,28 @@ class FileTranscriber(QObject):
             self._local = None
             if workdir:
                 shutil.rmtree(workdir, ignore_errors=True)
+
+    def _chunks(self, wav_path, workdir, target, timestamps):
+        """[(the file to send, its offset in seconds)], one entry where it can be.
+
+        A server on this machine is handed the WAV as it is: nothing is being
+        uploaded, so the encoder would cost quality and buy nothing.
+        """
+        if target.provider == "local":
+            return [(wav_path, 0.0)]
+
+        whole = _to_mp3(wav_path, workdir, "audio.mp3", self._abort)
+        seconds = chunk_seconds(whole, wav_seconds(wav_path))
+        if not seconds:
+            return [(whole, 0.0)]
+
+        # Only a timestamped run can tell what it has already heard, so only it
+        # can afford the overlap that keeps a cue off the cut.
+        self._check()
+        pieces = split_wav(wav_path, workdir, seconds,
+                           OVERLAP_SECONDS if timestamps else 0)
+        return [(_to_mp3(piece, workdir, f"chunk-{index:03d}.mp3", self._abort), offset)
+                for index, (piece, offset) in enumerate(pieces)]
 
     def _cleanup(self, text, timestamps):
         conf = self.conf
@@ -220,9 +255,32 @@ def _reap(proc):
 
 def _to_wav(path, workdir, aborter=None):
     out = os.path.join(workdir, "audio.wav")
+    return _ffmpeg(["-i", path, "-vn", "-ac", "1", "-ar", str(RATE),
+                    "-c:a", "pcm_s16le", out], out, aborter)
+
+
+def _to_mp3(wav_path, workdir, name, aborter=None):
+    """The same audio at a fifth of the size.
+
+    Which is the whole of it: uncompressed, an hour of speech is four uploads
+    and so three cuts, and every cut is a chance of the model losing the thread
+    of where its cues should end. Encoded it is one upload and no cuts. The
+    bitrate is far above what a 16 kHz mono voice has left to lose.
+    """
+    out = os.path.join(workdir, name)
+    try:
+        return _ffmpeg(["-i", wav_path, "-c:a", "libmp3lame", "-b:a", MP3_BITRATE, out],
+                       out, aborter)
+    except api.ApiError:
+        # An ffmpeg built without the encoder, which is rare and not worth
+        # failing over: the WAV transcribes just as well, it only has to be cut
+        # up more often to fit in a request.
+        return wav_path
+
+
+def _ffmpeg(args, out, aborter=None):
     proc = subprocess.Popen(
-        ["ffmpeg", "-nostdin", "-y", "-i", path, "-vn",
-         "-ac", "1", "-ar", str(RATE), "-c:a", "pcm_s16le", out],
+        ["ffmpeg", "-nostdin", "-y", *args],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True,
     )
@@ -242,30 +300,78 @@ def _to_wav(path, workdir, aborter=None):
     return out
 
 
-def split_wav(wav_path, workdir):
-    """[(chunk path, offset in seconds)], a single entry for short files."""
+def wav_seconds(wav_path):
+    with contextlib.closing(wave.open(wav_path, "rb")) as src:
+        return src.getnframes() / (src.getframerate() or RATE)
+
+
+def chunk_seconds(path, duration):
+    """How many seconds of this audio fit in one request, or 0 when all of it does.
+
+    Measured rather than worked out: what an encoder makes of an hour of speech
+    depends on the speech, and the file on disk is the only honest answer.
+    """
+    size = os.path.getsize(path)
+    if size <= UPLOAD_LIMIT or duration <= 0:
+        return 0.0
+    return max(60.0, duration * UPLOAD_LIMIT / size * 0.95)
+
+
+def split_wav(wav_path, workdir, seconds=WAV_CHUNK_SECONDS, overlap=OVERLAP_SECONDS):
+    """[(chunk path, offset in seconds)], a single entry for short files.
+
+    Every chunk but the first starts `overlap` seconds inside the one before it,
+    so the sentence the cut fell in the middle of is heard whole by one of them.
+    stitch() is what drops the telling that was cut short.
+    """
     with contextlib.closing(wave.open(wav_path, "rb")) as src:
         rate = src.getframerate()
         total = src.getnframes()
-        per_chunk = CHUNK_SECONDS * rate
-        if total <= per_chunk:
+        per_chunk = int(seconds * rate)
+        if per_chunk <= 0 or total <= per_chunk:
             return [(wav_path, 0.0)]
 
+        # Half a chunk is the most an overlap can be and still be an overlap.
+        step = per_chunk - int(max(0.0, min(overlap, seconds / 2)) * rate)
         chunks = []
-        index = 0
-        while True:
+        position = 0
+        while position < total:
+            # What is left is shorter than the overlap, so the chunk before this
+            # one already holds all of it.
+            if chunks and total - position <= per_chunk - step:
+                break
+            src.setpos(position)
             frames = src.readframes(per_chunk)
             if not frames:
                 break
-            path = os.path.join(workdir, f"chunk-{index:03d}.wav")
+            path = os.path.join(workdir, f"chunk-{len(chunks):03d}.wav")
             with contextlib.closing(wave.open(path, "wb")) as dst:
                 dst.setnchannels(src.getnchannels())
                 dst.setsampwidth(src.getsampwidth())
                 dst.setframerate(rate)
                 dst.writeframes(frames)
-            chunks.append((path, index * CHUNK_SECONDS))
-            index += 1
+            chunks.append((path, position / rate))
+            position += step
         return chunks
+
+
+def stitch(collected, incoming):
+    """Add a chunk's segments to the ones before it, minus what was heard twice.
+
+    The chunks overlap, so the sentence the cut landed in is in both of them:
+    cut short as the last cue of the chunk before, and whole somewhere in this
+    one. This chunk's telling of it is the one that stands, and the chunk before
+    gives way from wherever that telling begins, so that nothing is said twice
+    and the cues still run forwards.
+    """
+    if not collected:
+        return list(incoming)
+    kept = [segment for segment in incoming if segment[1] > collected[-1][0]]
+    if not kept:
+        return collected
+    seam = kept[0][0]
+    head = [segment for segment in collected if segment[1] <= seam]
+    return (head or collected[:-1]) + kept
 
 
 def split_text(text, timestamps):

@@ -37,6 +37,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -220,8 +221,15 @@ def _has_vulkan():
 
 
 def _wanted_assets(program):
-    """Asset name endings to accept, best first."""
+    """Asset name endings to accept, best first.
+
+    llama.cpp publishes native Metal-enabled macOS archives. whisper.cpp does
+    not publish a runnable macOS server archive, so an arm64 Mac must not
+    mistake Ubuntu's arm64 archive for a native build.
+    """
     arch = _arch()
+    if sys.platform == "darwin":
+        return () if program is WHISPER else (f"bin-macos-{arch}.tar.gz",)
     if program is LLAMA and _has_vulkan():
         return (f"bin-ubuntu-vulkan-{arch}.tar.gz", f"bin-ubuntu-{arch}.tar.gz")
     return (f"bin-ubuntu-{arch}.tar.gz",)
@@ -311,6 +319,11 @@ def install_program(program, tag="", on_progress=None, should_stop=None,
         if item:
             break
     if item is None:
+        if sys.platform == "darwin" and program is WHISPER:
+            raise LocalError(t(
+                "whisper.cpp publishes no macOS build. Install it with: "
+                "brew install whisper-cpp"
+            ))
         raise LocalError(t("{repo} {tag} has no build for this machine.",
                            repo=program.repo, tag=tag))
 

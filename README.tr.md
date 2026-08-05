@@ -30,6 +30,23 @@ systemctl --user enable --now ydotool     # otomatik yapıştırma için
 dikte                        # ilk açılışta ayarlar penceresi gelir
 ```
 
+Fedora'da paket adları farklı, Fedora'nın kendi depolarındaki `ffmpeg-free`
+yetiyor çünkü Dikte video dosyasının yalnızca ses izini alıyor, `ydotool` da
+bir adım fazla istiyor: sistem servisi olarak geliyor, soketi de root'a ait
+kalıp oturumun erişemediği yerde durduğu için servis çalışırken bile otomatik
+yapıştırma tutmuyor. Soketi istemcinin zaten baktığı yola al ve sahipliğini
+devret:
+
+```sh
+sudo dnf install pipewire-utils wl-clipboard ydotool ffmpeg-free python3-pyqt6
+sudo mkdir -p /etc/systemd/system/ydotool.service.d
+printf '[Service]\nExecStart=\nExecStart=/usr/bin/ydotoold --socket-path=%s/.ydotool_socket --socket-own=%s:%s\n' \
+  "$XDG_RUNTIME_DIR" "$(id -u)" "$(id -g)" \
+  | sudo tee /etc/systemd/system/ydotool.service.d/override.conf >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now ydotool
+```
+
 Ubuntu/GNOME X11 için kayıt PulseAudio üzerinden, pano ve yapıştırma ise X11
 araçlarıyla çalışır:
 

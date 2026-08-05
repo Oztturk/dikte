@@ -31,6 +31,23 @@ systemctl --user enable --now ydotool     # needed for auto-paste
 dikte                        # the settings window opens on first run
 ```
 
+On Fedora the packages are named differently, `ffmpeg-free` out of Fedora's own
+repositories is enough because Dikte only ever takes the audio track of a video
+file, and `ydotool` takes one step more: it ships as a system service, whose
+socket stays root-owned and out of your session's reach, so auto-paste fails
+with the daemon running. Point it at the path the client already looks at and
+hand the socket over:
+
+```sh
+sudo dnf install pipewire-utils wl-clipboard ydotool ffmpeg-free python3-pyqt6
+sudo mkdir -p /etc/systemd/system/ydotool.service.d
+printf '[Service]\nExecStart=\nExecStart=/usr/bin/ydotoold --socket-path=%s/.ydotool_socket --socket-own=%s:%s\n' \
+  "$XDG_RUNTIME_DIR" "$(id -u)" "$(id -g)" \
+  | sudo tee /etc/systemd/system/ydotool.service.d/override.conf >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now ydotool
+```
+
 On Ubuntu/GNOME X11, recording uses PulseAudio and clipboard/paste use the X11
 tools instead:
 

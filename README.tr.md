@@ -4,8 +4,9 @@
 çevrilir, bir model transkripti temizler (ıı'lar, tekrarlar, eksik noktalama),
 sonuç panoya kopyalanır ve o an yazdığın pencereye yapıştırılır.
 
-KDE Plasma 6 / Wayland için yazıldı. Sistem paketleri dışında bağımlılığı yok:
-sadece Python standart kütüphanesi ve PyQt6.
+KDE Plasma 6 / Wayland için yazıldı, GNOME X11 ve macOS'ta da çalışır. Sistem
+paketleri dışında bağımlılığı yok: sadece Python standart kütüphanesi (3.11 veya
+üstü) ve PyQt6.
 
 *[English README](README.md)*
 
@@ -29,12 +30,34 @@ systemctl --user enable --now ydotool     # otomatik yapıştırma için
 dikte                        # ilk açılışta ayarlar penceresi gelir
 ```
 
+Fedora'da paket adları farklı, Fedora'nın kendi depolarındaki `ffmpeg-free`
+yetiyor çünkü Dikte video dosyasının yalnızca ses izini alıyor, `ydotool` da
+bir adım fazla istiyor: sistem servisi olarak geliyor, soketi de root'a ait
+kalıp oturumun erişemediği yerde durduğu için servis çalışırken bile otomatik
+yapıştırma tutmuyor. Soketi istemcinin zaten baktığı yola al ve sahipliğini
+devret:
+
+```sh
+sudo dnf install pipewire-utils wl-clipboard ydotool ffmpeg-free python3-pyqt6
+sudo mkdir -p /etc/systemd/system/ydotool.service.d
+printf '[Service]\nExecStart=\nExecStart=/usr/bin/ydotoold --socket-path=%s/.ydotool_socket --socket-own=%s:%s\n' \
+  "$XDG_RUNTIME_DIR" "$(id -u)" "$(id -g)" \
+  | sudo tee /etc/systemd/system/ydotool.service.d/override.conf >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now ydotool
+```
+
 Ubuntu/GNOME X11 için kayıt PulseAudio üzerinden, pano ve yapıştırma ise X11
 araçlarıyla çalışır:
 
 ```sh
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
+
+macOS'ta `install.sh`'ın kuracağı bir kısayol kaydı yok, tuşları yakalayan
+dinleyici orada mekanizmanın kendisi, dolayısıyla kurulacak bir şey de yok:
+`brew install ffmpeg`, `pip install PyQt6`, sonra `python dikte.py`. Toplantı
+için BlackHole ya da Loopback gerekiyor, hoparlörden çıkanı kimse vermiyor.
 
 `install.sh` `dikte` komutunu, menü girdisini, oturum açılışında otomatik
 başlatmayı ve iki global kısayolu kurar; tuşları da iki argümanı. `./update.sh`
@@ -49,8 +72,9 @@ seçersen sesi yazıya çevirme **OpenAI**, **Groq** ya da **OpenRouter**'da
 (`google/gemini-3.5-flash-lite`) ya da kuruluysa Claude Code veya Codex'te
 çalışır. Anahtarları boş bırakırsan `OPENAI_API_KEY`, `GROQ_API_KEY` ve
 `OPENROUTER_API_KEY` kullanılır; anahtarlar `~/.config/dikte/config.json`
-içinde, izinler 600. Temizlemeyi tamamen kapatabilirsin, o zaman ham transkript
-yapıştırılır; modelin yanındaki kutudan düşünme seviyesini de seçebilirsin.
+içinde, izinler 600, Mac'te ise `~/Library/Application Support/Dikte` altında.
+Temizlemeyi tamamen kapatabilirsin, o zaman ham transkript yapıştırılır; modelin
+yanındaki kutudan düşünme seviyesini de seçebilirsin.
 
 ## Kullanım
 

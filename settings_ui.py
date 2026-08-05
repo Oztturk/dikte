@@ -23,6 +23,7 @@ import ggml
 import hotkey
 import ipc
 import meeting
+import paste
 from filetranscribe import FileTranscriber
 from i18n import t
 
@@ -106,7 +107,6 @@ REASONING_LEVELS = [
     ("Low", "low"), ("Medium", "medium"), ("High", "high"),
     ("Very high", "xhigh"), ("Maximum", "max"),
 ]
-PASTE_SHORTCUTS = ["ctrl+v", "ctrl+shift+v", "shift+insert"]
 # Offered for every global shortcut, which keeps them one kind of field rather
 # than four. The boxes stay editable: this is a shortlist of combinations that
 # are usually free, not the set of ones that work.
@@ -115,6 +115,13 @@ SHORTCUTS = [
     "Ctrl+Alt+A", "Ctrl+Alt+D", "Ctrl+Alt+M", "Ctrl+Alt+Q",
     "Meta+A", "Meta+D", "Meta+M",
     "Ctrl+Alt+F1", "Ctrl+Alt+F2", "Ctrl+Alt+F3",
+]
+# Cmd+Space is Spotlight and Ctrl+Space switches input sources, so a Mac gets
+# its own shortlist. Option is what Alt is called on that keyboard.
+MAC_SHORTCUTS = [
+    "Ctrl+Option+Space", "Cmd+Shift+Space", "Ctrl+Shift+Space",
+    "Ctrl+Option+A", "Ctrl+Option+D", "Ctrl+Option+M",
+    "Cmd+Option+A", "Cmd+Option+D", "Cmd+Option+M",
 ]
 AUDIO_FILTER = ("*.mp3 *.wav *.m4a *.ogg *.opus *.flac *.aac *.wma "
                 "*.mp4 *.mkv *.webm *.mov *.avi")
@@ -550,10 +557,16 @@ class SettingsWindow(QDialog):
         form.addRow("", self.auto_paste)
 
         self.paste_shortcut = QComboBox()
-        self.paste_shortcut.addItems(PASTE_SHORTCUTS)
-        self.paste_shortcut.setToolTip(
-            t("Terminals usually want ctrl+shift+v. Change this if pasting does nothing.")
-        )
+        # A shortlist of the combinations that usually paste, not the set of
+        # them: a stored one this desktop does not offer is kept as it is
+        # rather than quietly replaced by the first item on the list.
+        self.paste_shortcut.setEditable(True)
+        self.paste_shortcut.addItems(paste.desktop().shortcuts)
+        self.paste_shortcut.setToolTip(t(
+            "macOS asks for Accessibility permission the first time this is sent."
+            if paste.desktop() is paste.MACOS else
+            "Terminals usually want ctrl+shift+v. Change this if pasting does nothing."
+        ))
         form.addRow(t("Paste key"), self.paste_shortcut)
 
         self.restore_clipboard = QCheckBox(t("Restore the previous clipboard after pasting"))
@@ -591,7 +604,9 @@ class SettingsWindow(QDialog):
         )
         form.addRow("", self.filter_hallucinations)
 
-        self.keep_audio = QCheckBox(t("Keep audio files (~/.local/share/dikte/recordings)"))
+        self.keep_audio = QCheckBox(
+            t("Keep audio files ({path})", path=str(cfg.RECORDINGS_DIR))
+        )
         form.addRow("", self.keep_audio)
         return page
 
@@ -984,6 +999,15 @@ class SettingsWindow(QDialog):
             self.meeting_system.addItem(desc, name)
         sources_form.addRow(t("The other participants"), self.meeting_system)
 
+        if audio.sound() is audio.COREAUDIO:
+            mac_note = QLabel(t(
+                "macOS does not offer what the speakers are playing as something "
+                "to record. Install BlackHole or Loopback, send the meeting's "
+                "sound through it, and pick it above."
+            ))
+            mac_note.setWordWrap(True)
+            sources_form.addRow(mac_note)
+
         note = QLabel(t(
             "Wear headphones if you can. Through speakers your microphone hears "
             "the other side as well, and although a line that lands on both "
@@ -1224,20 +1248,34 @@ class SettingsWindow(QDialog):
         layout.addLayout(form)
 
         self.evdev_enabled = QCheckBox(t(
-            "Use the built-in listener (/dev/input), for when the KDE shortcut is "
-            "not active yet"
+            "Use the built-in listener (/dev/input), for when the {desktop} "
+            "shortcut is not active yet", desktop=hotkey.desktop_name()
         ))
         self.evdev_enabled.setToolTip(t(
             "Works immediately, no session restart. The only difference: the key "
             "combination also reaches the focused application."
         ))
         layout.addWidget(self.evdev_enabled)
+        # Nothing to wait for where nothing is installed: there the listener is
+        # the mechanism, always on, and not a choice to offer.
+        self.evdev_enabled.setVisible(hotkey.installs_shortcuts())
 
-        note = QLabel(t(
-            "KWin only reads shortcut settings at startup. After 'Install' the "
-            "shortcut shows up under System Settings → Shortcuts, but it will not "
-            "fire until you log out and back in. Until then, use the built-in listener."
-        ))
+        if hotkey.shortcut_needs_restart():
+            explanation = t(
+                "KWin only reads shortcut settings at startup. After 'Install' the "
+                "shortcut shows up under System Settings → Shortcuts, but it will "
+                "not fire until you log out and back in. Until then, use the "
+                "built-in listener."
+            )
+        elif hotkey.installs_shortcuts():
+            explanation = t("The shortcut starts working as soon as it is installed.")
+        else:
+            explanation = t(
+                "Dikte asks macOS for these combinations itself, while it is "
+                "running. Nothing is installed, and no other application receives "
+                "them in the meantime."
+            )
+        note = QLabel(explanation)
         note.setWordWrap(True)
         layout.addWidget(note)
         layout.addStretch(1)
@@ -1310,7 +1348,8 @@ class SettingsWindow(QDialog):
         """The field a global shortcut is typed or picked in."""
         box = QComboBox()
         box.setEditable(True)
-        box.addItems(SHORTCUTS)
+        box.addItems(MAC_SHORTCUTS if hotkey.desktop_name() == "macOS"
+                     else SHORTCUTS)
         box.setCurrentText("")
         if placeholder:
             box.lineEdit().setPlaceholderText(placeholder)
@@ -1344,16 +1383,31 @@ class SettingsWindow(QDialog):
         box = self._shortcut_box(placeholder or t("none"))
         if tooltip:
             box.setToolTip(tooltip)
-        install = QPushButton(t("Install as a KDE shortcut"))
-        install.clicked.connect(lambda: self._install_shortcut(which))
-        remove = QPushButton(t("Remove"))
-        remove.clicked.connect(lambda: self._remove_shortcut(which))
-        form.addRow(label, self._row(box, install, remove))
+        form.addRow(label, self._row(box, *self._install_buttons(
+            lambda: self._install_shortcut(which),
+            lambda: self._remove_shortcut(which),
+        )))
         status = QLabel("")
         status.setWordWrap(True)
         form.addRow(status)
         self._shortcut_rows[which] = (box, status, missing)
         return box
+
+    @staticmethod
+    def _install_buttons(install_handler, remove_handler):
+        """Install and Remove, where this system has somewhere to install into.
+
+        macOS has not: Dikte asks for the combination itself while it runs, so
+        there is nothing to write down and nothing to take back out.
+        """
+        if not hotkey.installs_shortcuts():
+            return []
+        install = QPushButton(t("Install as a {desktop} shortcut",
+                                desktop=hotkey.desktop_name()))
+        install.clicked.connect(install_handler)
+        remove = QPushButton(t("Remove"))
+        remove.clicked.connect(remove_handler)
+        return [install, remove]
 
     @staticmethod
     def _row(*widgets):

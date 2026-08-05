@@ -445,7 +445,7 @@ def _pulse_record(target):
         return cmd
     if shutil.which("pw-record"):
         cmd = [
-            "pw-record", "--raw", f"--rate={RATE}",
+            "pw-record", *_pw_record_raw_option(), f"--rate={RATE}",
             f"--channels={CHANNELS}", "--format=s16",
         ]
         if target:
@@ -453,6 +453,28 @@ def _pulse_record(target):
         cmd.append("-")
         return cmd
     return []
+
+
+def _pw_record_raw_option():
+    """Use --raw only on pw-record releases that provide it.
+
+    PipeWire gained --raw in 1.4, and in the same release stopped treating a
+    filename of "-" as raw on its own: before it, the option is refused and the
+    recorder dies before any sound arrives; after it, leaving the option out
+    wraps the stream in a container the rest of this file would read as noise.
+    Ubuntu 24.04 and anything else still on 1.0 or 1.2 sit on the near side of
+    that line, so ask the installed binary which form it understands.
+    """
+    try:
+        result = subprocess.run(
+            ["pw-record", "--help"], capture_output=True, text=True, timeout=2
+        )
+        help_text = (result.stdout or "") + (result.stderr or "")
+    except (subprocess.SubprocessError, OSError):
+        return ["--raw"]  # preserve the existing command when probing itself fails
+    if not help_text.strip():
+        return ["--raw"]
+    return ["--raw"] if "--raw" in help_text else []
 
 
 def _pulse_meeting(mic_target, system_target):

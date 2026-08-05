@@ -238,6 +238,14 @@ class FakeProcess:
 class RecordingCommand(OnLinux, DikteTest):
     """Which program captures the microphone, and how it is asked to."""
 
+    def setUp(self):
+        super().setUp()
+        # Whether pw-record takes --raw is read off the installed binary, and
+        # what is being tested here is the command rather than the machine the
+        # test is running on. PwRecordRawOption covers the reading itself.
+        self.enterContext(mock.patch.object(
+            audio, "_pw_record_raw_option", return_value=["--raw"]))
+
     def test_parec_is_preferred(self):
         """It speaks to PulseAudio and to PipeWire's compatibility service, so
         it is the one that works on both desktops."""
@@ -288,8 +296,44 @@ class RecordingCommand(OnLinux, DikteTest):
                                   if arg.startswith(flag)])
 
 
+class PwRecordRawOption(DikteTest):
+    """Two pw-record generations want opposite commands for the same stream.
+
+    PipeWire 1.4 added --raw and stopped treating a filename of "-" as raw on
+    its own, so the option is refused by everything older and needed by
+    everything newer. The help text is the only thing that tells them apart.
+    """
+
+    def option(self, **run):
+        with mock.patch.object(audio.subprocess, "run", **run):
+            return audio._pw_record_raw_option()
+
+    def test_a_version_that_offers_raw_is_asked_for_it(self):
+        self.assertEqual(["--raw"], self.option(
+            return_value=FakeCompleted(stdout="  -a, --raw   RAW mode\n")))
+
+    def test_a_version_without_it_is_not(self):
+        self.assertEqual([], self.option(
+            return_value=FakeCompleted(stdout="  --rate  Sample rate\n")))
+
+    def test_help_that_could_not_be_read_keeps_the_option(self):
+        """Whatever is installed, the command that worked before this check
+        existed is the safer guess."""
+        self.assertEqual(["--raw"], self.option(side_effect=OSError))
+        self.assertEqual(["--raw"], self.option(
+            side_effect=subprocess.TimeoutExpired("pw-record", 2)))
+
+    def test_help_that_said_nothing_keeps_it_too(self):
+        self.assertEqual(["--raw"], self.option(return_value=FakeCompleted()))
+
+
 class RecorderChain(OnLinux, DikteTest):
     """Start to WAV, with pw-record faked out."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(mock.patch.object(
+            audio, "_pw_record_raw_option", return_value=["--raw"]))
 
     def record(self, data, target="", max_seconds=300):
         recorder = audio.Recorder()

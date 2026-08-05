@@ -309,7 +309,7 @@ def local_failure(service, server, exc):
                     exc.status)
 
 
-def _transcribe_request(target, wav_path, language, prompt, response_format,
+def _transcribe_request(target, audio_path, language, prompt, response_format,
                         granularity=None, timeout=300, aborter=None):
     if target.provider == "local":
         # The timeouts here are sized for a hosted API, where a slow answer is a
@@ -329,7 +329,7 @@ def _transcribe_request(target, wav_path, language, prompt, response_format,
         fields.append(("prompt", prompt))
     if granularity:
         fields.append(("timestamp_granularities[]", granularity))
-    body, ctype = _multipart(fields, "file", wav_path)
+    body, ctype = _multipart(fields, "file", audio_path)
     try:
         return _request(
             f"{target.base_url.rstrip('/')}/audio/transcriptions", body,
@@ -381,9 +381,9 @@ def _merge_word_splits(segments):
     return merged
 
 
-def transcribe(target, wav_path, language="", prompt="", timeout=300, aborter=None):
+def transcribe(target, audio_path, language="", prompt="", timeout=300, aborter=None):
     data = _transcribe_request(
-        target, wav_path, language, prompt, "json", timeout=timeout, aborter=aborter
+        target, audio_path, language, prompt, "json", timeout=timeout, aborter=aborter
     )
     text = data.get("text") or ""
     if target.provider == "local":
@@ -394,12 +394,12 @@ def transcribe(target, wav_path, language="", prompt="", timeout=300, aborter=No
     return text
 
 
-def transcribe_segments(target, wav_path, language="", prompt="", timeout=300,
+def transcribe_segments(target, audio_path, language="", prompt="", timeout=300,
                         aborter=None):
     """[(start_seconds, end_seconds, text)] using whisper-1's verbose response."""
     data = _transcribe_request(
         target._replace(model=timestamp_model(target.provider, target.model)),
-        wav_path, language, prompt, "verbose_json",
+        audio_path, language, prompt, "verbose_json",
         granularity="segment", timeout=timeout, aborter=aborter,
     )
     segments = data.get("segments") or []

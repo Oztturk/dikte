@@ -7,6 +7,7 @@ made up a stamp nobody recorded.
 """
 
 import contextlib
+import os
 import time
 import unittest
 import wave
@@ -133,14 +134,12 @@ class SplitWav(DikteTest):
 
     def test_a_long_file_is_cut_at_the_chunk_length(self):
         path = self.wav(5)
-        with mock.patch.object(ft, "CHUNK_SECONDS", 2):
-            chunks = ft.split_wav(path, self.root)
+        chunks = ft.split_wav(path, self.root, 2, overlap=0)
         self.assertEqual([offset for _, offset in chunks], [0, 2, 4])
 
     def test_the_chunks_add_up_to_the_original(self):
         path = self.wav(5)
-        with mock.patch.object(ft, "CHUNK_SECONDS", 2):
-            chunks = ft.split_wav(path, self.root)
+        chunks = ft.split_wav(path, self.root, 2, overlap=0)
         total = 0
         for chunk_path, _ in chunks:
             with contextlib.closing(wave.open(chunk_path, "rb")) as wav:
@@ -150,9 +149,124 @@ class SplitWav(DikteTest):
 
     def test_the_chunks_do_not_write_over_each_other(self):
         path = self.wav(5)
-        with mock.patch.object(ft, "CHUNK_SECONDS", 2):
-            chunks = ft.split_wav(path, self.root)
+        chunks = ft.split_wav(path, self.root, 2, overlap=0)
         self.assertEqual(len({chunk for chunk, _ in chunks}), len(chunks))
+
+    def test_a_chunk_starts_inside_the_one_before_it(self):
+        """The cut is what makes whisper lose the thread, so nobody hears only
+        one side of it."""
+        path = self.wav(10)
+        chunks = ft.split_wav(path, self.root, 4, overlap=1)
+        self.assertEqual([offset for _, offset in chunks], [0, 3, 6])
+        with contextlib.closing(wave.open(chunks[1][0], "rb")) as wav:
+            self.assertEqual(wav.getnframes(), 4 * 16000)
+
+    def test_an_overlap_is_never_more_than_half_a_chunk(self):
+        path = self.wav(10)
+        chunks = ft.split_wav(path, self.root, 4, overlap=60)
+        self.assertEqual([offset for _, offset in chunks], [0, 2, 4, 6])
+
+    def test_a_tail_the_chunk_before_already_holds_is_not_cut_again(self):
+        path = self.wav(9)
+        chunks = ft.split_wav(path, self.root, 4, overlap=1)
+        # 0-4, 3-7, 6-9: a fourth starting at 9 would be the last second again.
+        self.assertEqual([offset for _, offset in chunks], [0, 3, 6])
+
+
+class Stitch(unittest.TestCase):
+    def test_the_first_chunk_is_taken_as_it_is(self):
+        segments = [(0.0, 1.0, "one"), (1.0, 2.0, "two")]
+        self.assertEqual(ft.stitch([], segments), segments)
+
+    def test_the_cue_the_cut_ran_through_is_replaced(self):
+        collected = [(0.0, 4.0, "a whole sentence"), (4.0, 5.0, "cut in ha")]
+        incoming = [(3.0, 4.0, "sentence"), (4.0, 6.0, "cut in half")]
+        self.assertEqual(ft.stitch(collected, incoming),
+                         [(0.0, 4.0, "a whole sentence"), (4.0, 6.0, "cut in half")])
+
+    def test_the_chunk_before_gives_way_where_the_new_telling_starts(self):
+        """The two chunks put the sentence in different cues; whichever way they
+        fall, nothing is said twice and the cues run forwards."""
+        collected = [(0.0, 3.0, "one"), (3.0, 5.0, "two"), (5.0, 6.0, "three cut")]
+        incoming = [(2.0, 4.5, "one and two"), (4.5, 7.0, "two and three whole")]
+        stitched = ft.stitch(collected, incoming)
+        self.assertEqual(stitched, [(0.0, 3.0, "one"), (4.5, 7.0, "two and three whole")])
+        for before, after in zip(stitched, stitched[1:]):
+            self.assertLessEqual(before[1], after[0])
+
+    def test_a_chunk_with_nothing_in_it_takes_nothing_away(self):
+        collected = [(0.0, 4.0, "one")]
+        self.assertEqual(ft.stitch(collected, []), collected)
+
+    def test_a_chunk_that_heard_only_what_was_already_heard_adds_nothing(self):
+        collected = [(0.0, 4.0, "one"), (4.0, 5.0, "two")]
+        self.assertEqual(ft.stitch(collected, [(1.0, 2.0, "one")]), collected)
+
+
+class ChunkSeconds(DikteTest):
+    def file(self, size):
+        path = self.path("audio.mp3")
+        with open(path, "wb") as fh:
+            fh.write(b"\x00" * size)
+        return path
+
+    def test_a_file_that_fits_is_not_cut_at_all(self):
+        self.assertEqual(ft.chunk_seconds(self.file(1024), 600), 0.0)
+
+    def test_a_file_over_the_limit_is_cut_by_what_it_measured(self):
+        # Twice the limit over an hour, so a little under half an hour fits.
+        seconds = ft.chunk_seconds(self.file(ft.UPLOAD_LIMIT * 2), 3600)
+        self.assertGreater(seconds, 1500)
+        self.assertLess(seconds, 1800)
+
+    def test_a_file_with_no_length_is_left_whole(self):
+        self.assertEqual(ft.chunk_seconds(self.file(ft.UPLOAD_LIMIT * 2), 0), 0.0)
+
+
+class Chunks(DikteTest):
+    """What each provider is handed, and in how many pieces."""
+
+    def setUp(self):
+        super().setUp()
+        self.wav = make_wav(self.path("audio.wav"), silence(3))
+        self.worker = ft.FileTranscriber(self.config())
+
+    def target(self, provider):
+        return api.Target(provider, provider, "key", "https://example.test", "whisper-1")
+
+    def test_a_model_on_this_machine_is_handed_the_wav(self):
+        """Nothing is uploaded, so the encoder would cost quality for nothing."""
+        with mock.patch.object(ft, "_to_mp3") as encode:
+            chunks = self.worker._chunks(self.wav, self.root, self.target("local"), True)
+        self.assertEqual(chunks, [(self.wav, 0.0)])
+        encode.assert_not_called()
+
+    def test_a_hosted_model_is_handed_one_mp3(self):
+        with mock.patch.object(ft, "_to_mp3", side_effect=lambda p, d, name, *a:
+                               make_wav(os.path.join(d, name), silence(1))):
+            chunks = self.worker._chunks(self.wav, self.root,
+                                         self.target("openrouter"), True)
+        self.assertEqual(len(chunks), 1)
+        self.assertTrue(chunks[0][0].endswith("audio.mp3"))
+
+    def test_a_file_too_big_to_upload_is_cut_and_encoded_in_pieces(self):
+        wav = make_wav(self.path("long.wav"), silence(120))
+
+        def encode(path, workdir, name, *args):
+            # The whole file is over the limit; the pieces are not.
+            size = ft.UPLOAD_LIMIT * 2 if name == "audio.mp3" else 1024
+            out = os.path.join(workdir, name)
+            with open(out, "wb") as fh:
+                fh.write(b"\x00" * size)
+            return out
+
+        with mock.patch.object(ft, "_to_mp3", side_effect=encode):
+            chunks = self.worker._chunks(wav, self.root,
+                                         self.target("openrouter"), True)
+        self.assertGreater(len(chunks), 1)
+        self.assertEqual(chunks[0][1], 0.0)
+        for path, _ in chunks:
+            self.assertTrue(path.endswith(".mp3"))
 
 
 class Transcriber(DikteTest):
@@ -175,6 +289,8 @@ class Transcriber(DikteTest):
             return make_wav(self.path("converted.wav"), tone(1.0))
 
         with mock.patch.object(ft, "_to_wav", side_effect=to_wav), \
+                mock.patch.object(ft, "_to_mp3",
+                                  side_effect=lambda path, *a, **k: path), \
                 mock.patch.object(ft.shutil, "which", return_value="/usr/bin/ffmpeg"), \
                 mock.patch.object(api, "transcribe",
                                   side_effect=fail or (lambda *a, **k: transcript)), \
@@ -237,6 +353,8 @@ class Transcriber(DikteTest):
     def test_the_request_is_handed_the_stop_to_watch(self):
         worker = ft.FileTranscriber(self.conf)
         with mock.patch.object(ft, "_to_wav", side_effect=lambda *a: self.source), \
+                mock.patch.object(ft, "_to_mp3",
+                                  side_effect=lambda path, *a, **k: path), \
                 mock.patch.object(ft.shutil, "which", return_value="/usr/bin/ffmpeg"), \
                 mock.patch.object(api, "transcribe", return_value="text") as call:
             worker._work(self.source, False, False)

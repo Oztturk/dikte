@@ -458,9 +458,12 @@ def _pulse_record(target):
 def _pw_record_raw_option():
     """Use --raw only on pw-record releases that provide it.
 
-    PipeWire 1.0, including Ubuntu 24.04's build, writes raw PCM to stdout but
-    rejects the newer --raw option. A rejected option ends the recorder before
-    it receives sound, so ask the installed binary which form it understands.
+    PipeWire gained --raw in 1.4, and in the same release stopped treating a
+    filename of "-" as raw on its own: before it, the option is refused and the
+    recorder dies before any sound arrives; after it, leaving the option out
+    wraps the stream in a container the rest of this file would read as noise.
+    Ubuntu 24.04 and anything else still on 1.0 or 1.2 sit on the near side of
+    that line, so ask the installed binary which form it understands.
     """
     try:
         result = subprocess.run(

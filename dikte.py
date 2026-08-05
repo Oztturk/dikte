@@ -20,6 +20,15 @@ import threading
 if os.environ.get("XDG_SESSION_TYPE") == "wayland" and os.environ.get("DISPLAY"):
     os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
+# An application started from the Finder is given none of the shell's PATH, so
+# Homebrew's ffmpeg is invisible to it. Put the two places brew installs to in
+# front, before anything goes looking for a program.
+if sys.platform == "darwin":
+    os.environ["PATH"] = os.pathsep.join(
+        part for part in ("/opt/homebrew/bin", "/usr/local/bin",
+                          os.environ.get("PATH", "")) if part
+    )
+
 from PyQt6.QtCore import QTimer, QElapsedTimer, QSocketNotifier  # noqa: E402
 from PyQt6.QtGui import QAction, QIcon  # noqa: E402
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
@@ -96,7 +105,7 @@ class Dikte:
         self.ask_pipeline = Pipeline(self.conf)
         self.meeting_recorder = audio.MeetingRecorder()
         self.meetings = MeetingPipeline(self.conf)
-        self.evdev = hotkey.EvdevHotkey()
+        self.evdev = hotkey.listener()
         # Before anything of ours is started: a server from a Dikte that was
         # killed outright is still holding a model in memory.
         ggml.sweep()
@@ -325,8 +334,11 @@ class Dikte:
         # that same press. Its lateness is also the proof we were waiting for
         # that the shortcut is live, which leaves the listener with nothing to
         # do but double every press.
+        # Where nothing was installed there is no shortcut to catch up, and
+        # retiring the listener would leave the keys with nowhere to arrive.
         timer = self.last_evdev.get(name)
-        if self.evdev.running and timer is not None and timer.elapsed() < ECHO_MS:
+        if (hotkey.installs_shortcuts() and self.evdev.running
+                and timer is not None and timer.elapsed() < ECHO_MS):
             self._retire_listener()
             return
         handler()
@@ -346,8 +358,9 @@ class Dikte:
         self.conf.save()
         self.tray.showMessage(
             "Dikte",
-            t("The KDE shortcut is live now, so the built-in listener has been "
-              "turned off. It was doubling every key press."),
+            t("The {desktop} shortcut is live now, so the built-in listener has "
+              "been turned off. It was doubling every key press.",
+              desktop=hotkey.desktop_name()),
             QSystemTrayIcon.MessageIcon.Information, 8000,
         )
 
@@ -853,7 +866,10 @@ class Dikte:
         self._apply_local()
         self._build_tray()
         self._refresh_tray()
-        if self.conf["evdev_hotkey"]:
+        # Where the desktop has no shortcut registry of its own, the listener is
+        # not the fallback the setting offers to turn on: it is the only way the
+        # keys arrive at all, so it runs whatever the setting says.
+        if self.conf["evdev_hotkey"] or not hotkey.installs_shortcuts():
             self.evdev.start({name: self.conf[spec.setting]
                               for name, spec in hotkey.SHORTCUTS.items()})
         else:

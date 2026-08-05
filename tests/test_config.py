@@ -16,6 +16,7 @@ import cleanup
 import config as cfg
 import ggml
 import i18n
+import paste
 from tests.support import DikteTest
 
 
@@ -452,6 +453,39 @@ class Defaults(unittest.TestCase):
             for suffix in ("EN", "TR"):
                 with self.subTest(prompt=f"{name}_{suffix}"):
                     self.assertTrue(getattr(cfg, f"{name}_{suffix}").strip())
+
+    def test_the_paste_key_is_the_one_this_desktop_pastes_with(self):
+        """cmd+v on a Mac, and it must be one paste.py can actually press."""
+        self.assertEqual(cfg.DEFAULTS["paste_shortcut"],
+                         paste.desktop().shortcuts[0])
+
+
+class Directories(unittest.TestCase):
+    """Where the settings and the recordings are kept, per system."""
+
+    def test_linux_keeps_them_apart_and_follows_xdg(self):
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c",
+                                          "XDG_DATA_HOME": "/d"}):
+            config_dir, data_dir = cfg._directories("linux")
+        self.assertEqual(str(config_dir), "/c/dikte")
+        self.assertEqual(str(data_dir), "/d/dikte")
+
+    def test_linux_without_the_variables_set(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config_dir, data_dir = cfg._directories("linux")
+        self.assertTrue(str(config_dir).endswith("/.config/dikte"))
+        self.assertTrue(str(data_dir).endswith("/.local/share/dikte"))
+
+    def test_a_mac_keeps_both_in_application_support(self):
+        config_dir, data_dir = cfg._directories("darwin")
+        self.assertEqual(config_dir, data_dir)
+        self.assertTrue(str(config_dir).endswith("/Library/Application Support/Dikte"))
+
+    def test_a_mac_does_not_read_the_xdg_variables(self):
+        """A Mac with them set from some other tool still stores in one place."""
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c"}):
+            config_dir, _ = cfg._directories("darwin")
+        self.assertNotIn("/c", str(config_dir))
 
 
 if __name__ == "__main__":

@@ -5,8 +5,9 @@ machine by default, a model cleans it up (dropping the *uh*s, the restarts, the
 missing punctuation), and the result lands in your clipboard and is pasted into
 whatever window you were typing in.
 
-Built for KDE Plasma 6 on Wayland. No dependencies beyond system packages:
-just the Python standard library and PyQt6.
+Built for KDE Plasma 6 on Wayland, and runs on GNOME X11 and macOS too. No
+dependencies beyond system packages: just the Python standard library, 3.11 or
+newer, and PyQt6.
 
 *[Türkçe README](README.tr.md)*
 
@@ -37,6 +38,12 @@ tools instead:
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
 
+macOS has no shortcut registry for `install.sh` to install into, so the listener
+that catches the keys is the mechanism there and there is nothing to run:
+`brew install ffmpeg`, `pip install PyQt6`, then `python dikte.py`. A meeting
+needs BlackHole or Loopback, because nothing else offers what the speakers are
+playing.
+
 `install.sh` adds the `dikte` command, a menu entry, an autostart entry and the
 two global shortcuts, whose keys are its two arguments. `./update.sh` pulls and
 puts all of that back, keeping the keys you chose; `./uninstall.sh` takes it away
@@ -48,9 +55,10 @@ speech to text on **OpenAI**, **Groq** or **OpenRouter** (`gpt-4o-transcribe`),
 cleanup on OpenRouter (`google/gemini-3.5-flash-lite`) or, when either is
 installed, on Claude Code or Codex. The keys fall back to `OPENAI_API_KEY`,
 `GROQ_API_KEY` and `OPENROUTER_API_KEY`, and are stored in
-`~/.config/dikte/config.json`, mode 600. Cleanup can be switched off, in which
-case the raw transcript is pasted, and a thinking model's effort can be set next
-to it.
+`~/.config/dikte/config.json`, mode 600, or in
+`~/Library/Application Support/Dikte` on a Mac. Cleanup can be switched off, in
+which case the raw transcript is pasted, and a thinking model's effort can be
+set next to it.
 
 ## Using it
 

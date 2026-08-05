@@ -17,6 +17,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _SANDBOX = tempfile.mkdtemp(prefix="dikte-tests-")
 os.environ["XDG_CONFIG_HOME"] = os.path.join(_SANDBOX, "config")
 os.environ["XDG_DATA_HOME"] = os.path.join(_SANDBOX, "data")
+# Home goes with them: the shortcut file, the applications directory and every
+# macOS path start from it rather than from an XDG variable, and a test run is
+# not allowed to touch the real one.
+os.environ["HOME"] = os.path.join(_SANDBOX, "home")
+os.makedirs(os.environ["HOME"], exist_ok=True)
 atexit.register(shutil.rmtree, _SANDBOX, True)
 
 # A key sitting in the environment would otherwise reach the code that falls

@@ -5,7 +5,7 @@
 sonuç panoya kopyalanır ve o an yazdığın pencereye yapıştırılır.
 
 KDE Plasma 6 / Wayland için yazıldı. Sistem paketleri dışında bağımlılığı yok:
-sadece Python standart kütüphanesi ve PyQt6.
+sadece Python standart kütüphanesi (3.11 veya üstü) ve PyQt6.
 
 *[English README](README.md)*
 

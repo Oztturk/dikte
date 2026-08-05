@@ -6,7 +6,7 @@ missing punctuation), and the result lands in your clipboard and is pasted into
 whatever window you were typing in.
 
 Built for KDE Plasma 6 on Wayland. No dependencies beyond system packages:
-just the Python standard library and PyQt6.
+just the Python standard library, 3.11 or newer, and PyQt6.
 
 *[Türkçe README](README.tr.md)*
 

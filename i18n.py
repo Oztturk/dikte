@@ -554,6 +554,22 @@ TR = {
         "Hangi ses çıkışının kaydedileceği anlaşılamadı. Ayarlar → Toplantı "
         "sekmesinden seç.",
     "Nothing was recorded: {error}": "Hiçbir şey kaydedilmedi: {error}",
+    "The saved macOS audio device uses an old numeric index. Open Settings and "
+    "select the device again before recording.":
+        "Kayıtlı macOS ses aygıtı eski bir sayısal indeks kullanıyor. Kayıttan "
+        "önce Ayarlar'ı açıp aygıtı yeniden seç.",
+    "The saved macOS audio device is no longer connected: {device}. Open "
+    "Settings and select another device.":
+        "Kayıtlı macOS ses aygıtı artık bağlı değil: {device}. Ayarlar'ı açıp "
+        "başka bir aygıt seç.",
+    "More than one macOS audio device is named {device}. Disconnect the "
+    "duplicate or choose a different device.":
+        "Birden fazla macOS ses aygıtının adı {device}. Aynı adlı aygıtlardan "
+        "birini çıkar ya da başka bir aygıt seç.",
+    "The macOS microphone stopped delivering audio ({percent}% was empty). The "
+    "unusable recording was discarded; reconnect the device and try again.":
+        "macOS mikrofonu ses iletmeyi durdurdu (kaydın %{percent} kadarı boştu). "
+        "Kullanılamaz kayıt silindi; aygıtı yeniden bağlayıp tekrar dene.",
     "Transcribing {side}: {index}/{count}…":
         "{side} yazıya çevriliyor: {index}/{count}…",
     "you": "sen",

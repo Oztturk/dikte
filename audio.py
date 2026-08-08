@@ -9,7 +9,8 @@ over an hour.
 Which programs do the capturing is a property of the machine, not of the code
 above: PulseAudio or PipeWire on Linux, AVFoundation through ffmpeg on macOS.
 They are gathered into one group each near the bottom of this file, and a
-chooser picks between them.
+chooser picks between them. macOS uses one ffmpeg process per AVFoundation
+device: two AVFoundation sessions in one process silently starve one another.
 """
 
 import array
@@ -63,7 +64,11 @@ class Recorder(QObject):
     def start(self, target="", max_seconds=300):
         if self.active:
             return
-        cmd = recording_command(target)
+        try:
+            cmd = recording_command(target)
+        except AudioDeviceError as exc:
+            self.failed.emit(str(exc))
+            return
         if not cmd:
             self.failed.emit(t(sound().missing))
             return
@@ -185,9 +190,24 @@ def recording_command(target=""):
     return sound().record(target)
 
 
-def meeting_command(mic_target, system_target):
-    """One ffmpeg reading both devices and merging them into two channels."""
-    return sound().meeting(mic_target, system_target)
+def meeting_commands(mic_target, system_target):
+    """The capture processes that produce one stereo meeting stream.
+
+    PulseAudio can keep both inputs in one ffmpeg process. AVFoundation cannot:
+    on a real Mac its two sessions silently starve the microphone, so each Mac
+    device is captured and clock-corrected by its own process. MeetingRecorder
+    interleaves those two mono streams after that.
+    """
+    if sound() is COREAUDIO:
+        return [
+            _avfoundation_meeting_capture(mic_target),
+            _avfoundation_meeting_capture(system_target),
+        ]
+    return [sound().meeting(mic_target, system_target)]
+
+
+class AudioDeviceError(RuntimeError):
+    """A saved capture device can no longer be selected safely."""
 
 
 class MeetingRecorder(QObject):
@@ -208,11 +228,14 @@ class MeetingRecorder(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._proc = None
+        self._procs = []
         self._thread = None
         self._wav = None
-        self._log = None
+        self._logs = []
         self._path = ""
         self._frames = 0
+        self._mic_zero_frames = 0
+        self._split_inputs = False
         self._cancelled = False
         self._stopping = False
         self._lock = threading.Lock()
@@ -234,7 +257,11 @@ class MeetingRecorder(QObject):
                                "Pick one in Settings → Meeting."))
             return
 
-        cmd = meeting_command(mic_target, system_target)
+        try:
+            commands = meeting_commands(mic_target, system_target)
+        except AudioDeviceError as exc:
+            self.failed.emit(str(exc))
+            return
 
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -244,11 +271,17 @@ class MeetingRecorder(QObject):
             self._wav.setframerate(RATE)
             # ffmpeg keeps talking to stderr for as long as it runs; a pipe
             # nobody drains would eventually block it, so it writes to a file.
-            self._log = tempfile.TemporaryFile()
-            self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=self._log, bufsize=0
-            )
+            self._logs = [tempfile.TemporaryFile() for _ in commands]
+            self._procs = []
+            for command, log in zip(commands, self._logs):
+                self._procs.append(subprocess.Popen(
+                    command, stdout=subprocess.PIPE, stderr=log, bufsize=0
+                ))
+            self._proc = self._procs[0]
         except (OSError, wave.Error) as exc:
+            self._terminate_processes()
+            self._proc = None
+            self._procs = []
             self._close_file()
             self._drop_log()
             try:
@@ -260,6 +293,8 @@ class MeetingRecorder(QObject):
 
         self._path = path
         self._frames = 0
+        self._mic_zero_frames = 0
+        self._split_inputs = len(self._procs) == 2
         self._cancelled = False
         self._stopping = False
         self._max_frames = int(max_seconds * RATE)
@@ -267,38 +302,75 @@ class MeetingRecorder(QObject):
         self._thread.start()
 
     def _pump(self):
-        stdout = self._proc.stdout
-        block = CHUNK_FRAMES * SAMPLE_WIDTH * 2
-        try:
-            while True:
-                chunk = stdout.read(block)
-                if not chunk:
-                    break
-                mine, theirs = stereo_levels(chunk)
-                with self._lock:
-                    if self._wav is None:
-                        break
-                    self._wav.writeframes(chunk)
-                    self._frames += len(chunk) // (SAMPLE_WIDTH * 2)
-                    too_long = self._frames >= self._max_frames
-                self.levels.emit(mine, theirs)
-                if too_long:
-                    self._terminate()
-                    break
-        except (OSError, ValueError, wave.Error):
-            pass
+        if self._split_inputs:
+            self._pump_split()
+        else:
+            self._pump_merged()
         # Nobody asked it to end: the sound device went away, or ffmpeg fell
         # over. An hour into a meeting that has to be said out loud rather than
         # discovered afterwards.
         if not self._stopping:
             self.died.emit()
 
+    def _pump_merged(self):
+        stdout = self._procs[0].stdout
+        block = CHUNK_FRAMES * SAMPLE_WIDTH * 2
+        try:
+            while True:
+                chunk = stdout.read(block)
+                if not chunk:
+                    break
+                if not self._write_chunk(chunk):
+                    break
+        except (OSError, ValueError, wave.Error):
+            pass
+
+    def _pump_split(self):
+        left = self._procs[0].stdout
+        right = self._procs[1].stdout
+        block = CHUNK_FRAMES * SAMPLE_WIDTH
+        try:
+            while True:
+                mine = _read_exact(left, block)
+                theirs = _read_exact(right, block)
+                if not mine or not theirs:
+                    break
+                frames = min(len(mine), len(theirs)) // SAMPLE_WIDTH
+                mine = mine[:frames * SAMPLE_WIDTH]
+                theirs = theirs[:frames * SAMPLE_WIDTH]
+                self._mic_zero_frames += _zero_samples(mine)
+                if not self._write_chunk(interleave_mono(mine, theirs)):
+                    break
+        except (OSError, ValueError, wave.Error):
+            pass
+
+    def _write_chunk(self, chunk):
+        mine, theirs = stereo_levels(chunk)
+        with self._lock:
+            if self._wav is None:
+                return False
+            self._wav.writeframes(chunk)
+            self._frames += len(chunk) // (SAMPLE_WIDTH * 2)
+            too_long = self._frames >= self._max_frames
+        self.levels.emit(mine, theirs)
+        if too_long:
+            self._terminate()
+            return False
+        return True
+
     def _terminate(self):
         self._stopping = True
-        proc = self._proc
-        if proc and proc.poll() is None:
+        self._terminate_processes()
+
+    def _terminate_processes(self):
+        running = [proc for proc in self._procs if proc.poll() is None]
+        for proc in running:
             try:
                 proc.send_signal(signal.SIGINT)
+            except OSError:
+                pass
+        for proc in running:
+            try:
                 proc.wait(timeout=2)
             except (subprocess.TimeoutExpired, OSError):
                 try:
@@ -316,23 +388,27 @@ class MeetingRecorder(QObject):
                 pass
 
     def _error_tail(self):
-        if self._log is None:
-            return ""
-        try:
-            self._log.seek(0)
-            text = self._log.read().decode("utf-8", "replace").strip()
-        except OSError:
-            return ""
-        lines = [line for line in text.splitlines() if line.strip()]
-        return lines[-1] if lines else ""
+        tails = []
+        for log in self._logs:
+            try:
+                log.seek(0)
+                text = log.read().decode("utf-8", "replace").strip()
+            except OSError:
+                continue
+            lines = [line for line in text.splitlines() if line.strip()]
+            if lines:
+                tails.append(lines[-1])
+        return " | ".join(tails)
 
     def _finish_process(self):
         self._terminate()
         if self._thread:
             self._thread.join(timeout=3)
         self._thread = None
-        code = self._proc.poll() if self._proc else 0
+        codes = [proc.poll() for proc in self._procs]
+        code = next((value for value in codes if value), 0)
         self._proc = None
+        self._procs = []
         self._close_file()
         return code
 
@@ -370,16 +446,30 @@ class MeetingRecorder(QObject):
                 if tail or code else t("Recording too short, speak for at least 0.3 s")
             )
             return
+        if (self._split_inputs and frames >= RATE * 10
+                and self._mic_zero_frames / frames > 0.5):
+            empty = round(self._mic_zero_frames / frames * 100)
+            self._drop_log()
+            try:
+                os.unlink(self._path)
+            except OSError:
+                pass
+            self.failed.emit(t(
+                "The macOS microphone stopped delivering audio ({percent}% was "
+                "empty). The unusable recording was discarded; reconnect the "
+                "device and try again.", percent=empty,
+            ))
+            return
         self._drop_log()
         self.stopped.emit(self._path, frames / RATE)
 
     def _drop_log(self):
-        if self._log is not None:
+        for log in self._logs:
             try:
-                self._log.close()
+                log.close()
             except OSError:
                 pass
-            self._log = None
+        self._logs = []
 
 
 def chunk_levels(chunk):
@@ -403,6 +493,38 @@ def stereo_levels(chunk):
     samples.frombytes(chunk[:usable])
     left, right = samples[0::2], samples[1::2]
     return _peak(left), _peak(right)
+
+
+def interleave_mono(left, right):
+    """Two equally long mono-s16 buffers into one stereo-s16 buffer."""
+    left_samples = array.array("h")
+    right_samples = array.array("h")
+    left_samples.frombytes(left[:len(left) - len(left) % SAMPLE_WIDTH])
+    right_samples.frombytes(right[:len(right) - len(right) % SAMPLE_WIDTH])
+    frames = min(len(left_samples), len(right_samples))
+    stereo_samples = array.array("h")
+    stereo_samples.extend(
+        sample for pair in zip(left_samples[:frames], right_samples[:frames])
+        for sample in pair
+    )
+    return stereo_samples.tobytes()
+
+
+def _read_exact(stream, size):
+    """Read one meter-sized block, tolerating short unbuffered pipe reads."""
+    out = bytearray()
+    while len(out) < size:
+        chunk = stream.read(size - len(out))
+        if not chunk:
+            break
+        out.extend(chunk)
+    return bytes(out)
+
+
+def _zero_samples(chunk):
+    samples = array.array("h")
+    samples.frombytes(chunk[:len(chunk) - len(chunk) % SAMPLE_WIDTH])
+    return sum(sample == 0 for sample in samples)
 
 
 def _peak(samples):
@@ -542,6 +664,7 @@ LOOPBACK_DEVICES = ("blackhole", "loopback", "soundflower")
 def _avfoundation_record(target):
     if not shutil.which("ffmpeg"):
         return []
+    target = _resolve_avfoundation_target(target)
     return [
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
         # AVFoundation names an input "video:audio", so the empty half in front
@@ -551,15 +674,15 @@ def _avfoundation_record(target):
     ]
 
 
-def _avfoundation_meeting(mic_target, system_target):
+def _avfoundation_meeting_capture(target):
+    target = _resolve_avfoundation_target(target)
     return [
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
         "-thread_queue_size", "4096",
-        "-f", "avfoundation", "-i", f":{mic_target or 'default'}",
-        "-thread_queue_size", "4096",
-        "-f", "avfoundation", "-i", f":{system_target}",
-        "-filter_complex", MERGE_FILTER, "-map", "[out]",
-        "-f", "s16le", "-ar", str(RATE), "-",
+        "-f", "avfoundation", "-i", f":{target or 'default'}",
+        "-af", (f"aresample={RATE}:async=1:first_pts=0,"
+                "aformat=sample_fmts=s16:channel_layouts=mono"),
+        "-f", "s16le", "-ar", str(RATE), "-ac", "1", "-",
     ]
 
 
@@ -596,10 +719,40 @@ def _avfoundation_inputs():
     return devices
 
 
+def _avfoundation_named_inputs():
+    """Stable settings values: the name is saved, never the moving index."""
+    return [(description, description)
+            for _index, description in _avfoundation_inputs()]
+
+
+def _resolve_avfoundation_target(target):
+    """Resolve a stored device name to its current, positional ffmpeg index."""
+    if not target or target == "default":
+        return "default"
+    if str(target).isdigit():
+        raise AudioDeviceError(t(
+            "The saved macOS audio device uses an old numeric index. Open "
+            "Settings and select the device again before recording."
+        ))
+    matches = [index for index, description in _avfoundation_inputs()
+               if description == target]
+    if not matches:
+        raise AudioDeviceError(t(
+            "The saved macOS audio device is no longer connected: {device}. "
+            "Open Settings and select another device.", device=target,
+        ))
+    if len(matches) > 1:
+        raise AudioDeviceError(t(
+            "More than one macOS audio device is named {device}. Disconnect the "
+            "duplicate or choose a different device.", device=target,
+        ))
+    return matches[0]
+
+
 def _avfoundation_default_output():
-    for name, description in _avfoundation_inputs():
+    for _index, description in _avfoundation_inputs():
         if any(word in description.lower() for word in LOOPBACK_DEVICES):
-            return name
+            return description
     return ""
 
 
@@ -622,12 +775,12 @@ PULSE = Sound(
 
 COREAUDIO = Sound(
     record=_avfoundation_record,
-    meeting=_avfoundation_meeting,
-    inputs=_avfoundation_inputs,
+    meeting=None,  # two separate capture processes; see meeting_commands()
+    inputs=_avfoundation_named_inputs,
     # Every macOS capture device is offered as the far side of a meeting, the
     # loopback driver among them: there is no way to tell them apart, and an
     # empty list would leave nothing to pick.
-    outputs=_avfoundation_inputs,
+    outputs=_avfoundation_named_inputs,
     default_output=_avfoundation_default_output,
     missing="ffmpeg not found. Install it with: brew install ffmpeg",
 )

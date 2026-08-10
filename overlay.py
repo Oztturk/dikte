@@ -65,16 +65,23 @@ class Overlay(QWidget):
             # It is the window manager that would otherwise move this out of
             # the corner. macOS has no such hint, and Qt warns about it.
             flags |= Qt.WindowType.X11BypassWindowManagerHint
-        self.setWindowFlags(flags)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         # One that can be clicked away has to receive the click, which means it
         # also swallows one aimed at whatever is underneath it. The rest stay
-        # transparent to the mouse, as an indicator should be.
+        # transparent to the mouse, as an indicator should be. It has to be this
+        # flag and not WA_TransparentForMouseEvents: on a top-level window the
+        # attribute only makes Qt drop the event it already took, so the click
+        # never reaches the window below. The flag is the one that tells the
+        # display server the window has no input region at all. It is read when
+        # the window is created and cannot be turned off later without the
+        # window being torn down and built again, which is why the dismissable
+        # one has to shrink itself instead (see _conceal).
         if dismissable:
             self.setCursor(Qt.CursorShape.PointingHandCursor)
         else:
-            self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            flags |= Qt.WindowType.WindowTransparentForInput
+        self.setWindowFlags(flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.resize(MIN_WIDTH, HEIGHT)
 
@@ -190,11 +197,19 @@ class Overlay(QWidget):
         to be a real repaint, not just zero opacity: with the animation stopped
         nothing else damages the surface, and the stale frame would sit on the
         screen until some other event made the compositor redraw it.
+
+        A window that stays mapped also stays clickable, though, and the one
+        that can be dismissed is the one that takes clicks. Left at full size it
+        would turn its corner of the screen into a dead zone long after there
+        was anything to see there, so it shrinks to a point. Resizing keeps the
+        surface alive, unlike hiding it.
         """
         self._anim.stop()
         self.state = "hidden"
         self._concealed = True
         self.repaint()
+        if self.dismissable:
+            self.resize(1, 1)
 
     def _resize_to_content(self):
         if self.state in LIVE:

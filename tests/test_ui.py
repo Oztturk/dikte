@@ -355,6 +355,25 @@ class Overlay(DikteTest):
         self.assertTrue(flags & Qt.WindowType.WindowDoesNotAcceptFocus)
         self.assertTrue(flags & Qt.WindowType.WindowStaysOnTopHint)
 
+    def test_it_lets_a_click_through_to_whatever_is_under_it(self):
+        """It stays mapped while idle, so without this its corner of the screen
+        would stop taking clicks for good. The widget attribute is not enough:
+        on a top-level window it only makes Qt drop the event it already took."""
+        from PyQt6.QtCore import Qt
+        flags = self.overlay().windowFlags()
+        self.assertTrue(flags & Qt.WindowType.WindowTransparentForInput)
+
+    def test_the_one_that_takes_clicks_shrinks_out_of_the_way(self):
+        """It has to stay clickable, so it cannot be transparent to input; it
+        gets out of the way by leaving nothing there to click instead."""
+        widget = self.overlay(dismissable=True)
+        widget.show_busy("Asking Claude…")
+        self.assertGreater(widget.width(), 1)
+        widget.dismiss()
+        self.assertEqual((widget.width(), widget.height()), (1, 1))
+        widget.show_busy("Asking Claude…")
+        self.assertGreater(widget.width(), 1)
+
     def test_recording_then_working_then_done(self):
         widget = self.overlay()
         widget.show_recording()

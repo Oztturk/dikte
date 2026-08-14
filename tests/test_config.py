@@ -492,8 +492,10 @@ class Directories(unittest.TestCase):
         self.assertNotIn("/c", config_dir.as_posix())
 
     def test_windows_keeps_settings_and_data_apart(self):
-        with mock.patch.dict(os.environ, {"APPDATA": r"C:\roam",
-                                          "LOCALAPPDATA": r"C:\local"}):
+        # Forward slashes, because a backslash only separates on Windows and
+        # this test also runs on the Linux that checks the Windows half.
+        with mock.patch.dict(os.environ, {"APPDATA": "C:/roam",
+                                          "LOCALAPPDATA": "C:/local"}):
             config_dir, data_dir = cfg._directories("win32")
         self.assertEqual(config_dir.as_posix(), "C:/roam/Dikte")
         self.assertEqual(data_dir.as_posix(), "C:/local/Dikte")

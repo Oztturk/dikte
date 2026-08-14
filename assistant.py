@@ -378,6 +378,7 @@ def _stream(cmd, conf, on_event, should_stop):
             cmd, cwd=working_dir(conf), stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except OSError as exc:
         raise AssistantError(t("Could not run {binary}: {error}",

@@ -27,6 +27,12 @@ def _directories(platform=None):
     if (platform or sys.platform) == "darwin":
         support = pathlib.Path.home() / "Library/Application Support/Dikte"
         return support, support
+    if (platform or sys.platform) == "win32":
+        roaming = pathlib.Path(
+            os.environ.get("APPDATA") or pathlib.Path.home() / "AppData/Roaming")
+        local = pathlib.Path(
+            os.environ.get("LOCALAPPDATA") or pathlib.Path.home() / "AppData/Local")
+        return roaming / "Dikte", local / "Dikte"
     return (_xdg("XDG_CONFIG_HOME", "~/.config") / "dikte",
             _xdg("XDG_DATA_HOME", "~/.local/share") / "dikte")
 

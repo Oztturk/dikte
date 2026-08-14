@@ -278,6 +278,159 @@ def _macos_press(shortcut, delay):
         core.CFRelease(up)
 
 
+def _win_keys(shortcut):
+    """'Ctrl+V' -> [0x11, 0x56]: Windows virtual-key codes, modifiers first."""
+    codes = []
+    for key in _keys(shortcut):
+        if key not in WIN_KEYCODES:
+            raise PasteError(t("Unknown key: {key}", key=key))
+        codes.append(WIN_KEYCODES[key])
+    return codes
+
+
+# Windows virtual-key codes (winuser.h). Like Apple's, they say where the key
+# sits rather than what a layout prints on it.
+WIN_KEYCODES = {
+    "ctrl": 0x11, "control": 0x11, "shift": 0x10, "alt": 0x12,
+    "super": 0x5B, "meta": 0x5B,
+    "v": 0x56, "insert": 0x2D, "enter": 0x0D, "return": 0x0D,
+}
+_WIN_KEYUP = 0x0002        # KEYEVENTF_KEYUP
+_WIN_CF_UNICODETEXT = 13   # what the clipboard calls UTF-16 text
+_WIN_GMEM_MOVEABLE = 0x0002
+
+
+@functools.lru_cache(maxsize=1)
+def _win_api():
+    """user32 and kernel32 with their prototypes spelled out.
+
+    The default return type is a 32-bit int, which silently truncates the
+    64-bit handles and pointers every one of these calls trades in.
+    """
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    user32.GetClipboardData.argtypes = [ctypes.c_uint]
+    user32.SetClipboardData.restype = ctypes.c_void_p
+    user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+    return user32, kernel32
+
+
+def _win_error():
+    """GetLastError where it exists, so the failure paths run under any test."""
+    return getattr(ctypes, "get_last_error", lambda: 0)()
+
+
+def _win_open_clipboard(user32):
+    """The clipboard is a lock another program may hold for a moment."""
+    for _ in range(10):
+        if user32.OpenClipboard(None):
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _win_read_text():
+    """The clipboard's text, '' when it holds none, None when it cannot be read."""
+    user32, kernel32 = _win_api()
+    if not _win_open_clipboard(user32):
+        return None
+    try:
+        handle = user32.GetClipboardData(_WIN_CF_UNICODETEXT)
+        if not handle:
+            return ""
+        pointer = kernel32.GlobalLock(handle)
+        if not pointer:
+            return None
+        try:
+            return ctypes.wstring_at(pointer)
+        finally:
+            kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()
+
+
+def _win_write_text(text):
+    user32, kernel32 = _win_api()
+    payload = str(text).encode("utf-16-le") + b"\x00\x00"
+    if not _win_open_clipboard(user32):
+        raise PasteError(t("Could not copy to clipboard: {error}",
+                           error="the clipboard is held by another program"))
+    handle = None
+    try:
+        user32.EmptyClipboard()
+        handle = kernel32.GlobalAlloc(_WIN_GMEM_MOVEABLE, len(payload))
+        pointer = kernel32.GlobalLock(handle) if handle else None
+        if not pointer:
+            raise PasteError(t("Could not copy to clipboard: {error}",
+                               error="out of memory"))
+        ctypes.memmove(pointer, payload, len(payload))
+        kernel32.GlobalUnlock(handle)
+        if not user32.SetClipboardData(_WIN_CF_UNICODETEXT, handle):
+            raise PasteError(t("Could not copy to clipboard: {error}",
+                               error=f"error {_win_error()}"))
+        handle = None  # the clipboard owns it now
+    finally:
+        if handle:
+            kernel32.GlobalFree(handle)
+        user32.CloseClipboard()
+
+
+class _WinKeybdInput(ctypes.Structure):
+    _fields_ = [("wVk", ctypes.c_ushort), ("wScan", ctypes.c_ushort),
+                ("dwFlags", ctypes.c_ulong), ("time", ctypes.c_ulong),
+                ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _WinMouseInput(ctypes.Structure):
+    _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                ("mouseData", ctypes.c_ulong), ("dwFlags", ctypes.c_ulong),
+                ("time", ctypes.c_ulong), ("dwExtraInfo", ctypes.c_size_t)]
+
+
+class _WinInputUnion(ctypes.Union):
+    _fields_ = [("mi", _WinMouseInput), ("ki", _WinKeybdInput)]
+
+
+class _WinInput(ctypes.Structure):
+    # The union carries the mouse shape too: SendInput sizes its argument by
+    # the biggest member whether or not it is the one being sent.
+    _fields_ = [("type", ctypes.c_ulong), ("union", _WinInputUnion)]
+
+
+def _win_press(shortcut, delay):
+    """Post the presses and releases straight into the input queue.
+
+    No permission stands in front of SendInput the way Accessibility does on
+    macOS: whatever window has focus receives the combination.
+    """
+    codes = _win_keys(shortcut)
+    user32, _ = _win_api()
+    time.sleep(delay)  # let the selection settle and focus come back
+
+    events = ([(code, 0) for code in codes]
+              + [(code, _WIN_KEYUP) for code in reversed(codes)])
+    inputs = (_WinInput * len(events))()
+    for entry, (code, flags) in zip(inputs, events):
+        entry.type = 1  # INPUT_KEYBOARD
+        entry.union.ki = _WinKeybdInput(code, 0, flags, 0, 0)
+    sent = user32.SendInput(len(inputs), inputs, ctypes.sizeof(_WinInput))
+    if sent != len(inputs):
+        raise PasteError(t("Could not run {tool}: {error}", tool="SendInput",
+                           error=f"error {_win_error()}"))
+
+
+def _win_ready():
+    return True
+
+
 # --- which of them is here -------------------------------------------------
 
 Desktop = collections.namedtuple(
@@ -310,6 +463,17 @@ X11 = Desktop(
     **_program_keyboard("xdotool", _xdotool_command),
 )
 
+WINDOWS = Desktop(
+    clipboard="",  # no program: both directions are calls into the system
+    packages="",
+    read_command=[],
+    copy_command=[],
+    shortcuts=["ctrl+v", "ctrl+shift+v", "shift+insert"],
+    keyboard="",
+    ready=_win_ready,
+    press=_win_press,
+)
+
 MACOS = Desktop(
     clipboard="pbcopy",
     packages="",   # both are part of macOS; there is nothing to install
@@ -331,6 +495,8 @@ def desktop():
     """
     if sys.platform == "darwin":
         return MACOS
+    if sys.platform == "win32":
+        return WINDOWS
     if os.environ.get("XDG_SESSION_TYPE") == "x11":
         return X11
     if os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
@@ -375,6 +541,9 @@ def _macos_restore(snapshot):
 
 def read_clipboard():
     here = desktop()
+    if here is WINDOWS:
+        text = _win_read_text()
+        return None if text is None else text.encode("utf-8")
     if here is MACOS and shutil.which("osascript"):
         snapshot = _macos_snapshot()
         if snapshot is not None:
@@ -402,6 +571,9 @@ def _run_copy(payload):
 
 def copy(text):
     here = desktop()
+    if here is WINDOWS:
+        _win_write_text(text)
+        return
     if not shutil.which(here.clipboard):
         raise PasteError(
             t("{tool} not found. Install {packages}.",
@@ -421,7 +593,15 @@ def copy_bytes(data):
     if isinstance(data, _MAC_SNAPSHOT):
         _macos_restore(data)
         return
-    if data is None or not shutil.which(desktop().clipboard):
+    if data is None:
+        return
+    if desktop() is WINDOWS:
+        try:
+            _win_write_text(data.decode("utf-8", "replace"))
+        except PasteError:
+            pass
+        return
+    if not shutil.which(desktop().clipboard):
         return
     try:
         _run_copy(data)

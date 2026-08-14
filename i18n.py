@@ -106,6 +106,10 @@ TR = {
         "Ses kayıt aracı bulunamadı. pulseaudio-utils ya da pipewire-audio kur.",
     "ffmpeg not found. Install it with: brew install ffmpeg":
         "ffmpeg bulunamadı. Şununla kur: brew install ffmpeg",
+    "ffmpeg or a microphone was not found. Install ffmpeg with: "
+    "winget install Gyan.FFmpeg":
+        "ffmpeg ya da bir mikrofon bulunamadı. ffmpeg'i şununla kur: "
+        "winget install Gyan.FFmpeg",
     "Audio recorder stopped before receiving sound: {error}":
         "Ses kayıt aracı veri alamadan kapandı: {error}",
     "Could not copy to clipboard: {error}": "Panoya kopyalanamadı: {error}",
@@ -354,6 +358,12 @@ TR = {
         "macOS kısayol servisine ulaşılamadı: {error}",
     "macOS would not give Dikte {shortcut}; another application already holds it.":
         "macOS {shortcut} kombinasyonunu Dikte'ye vermedi; başka bir uygulama "
+        "onu şimdiden tutuyor.",
+    "Could not reach the Windows shortcut service: {error}":
+        "Windows kısayol servisine ulaşılamadı: {error}",
+    "Windows would not give Dikte {shortcut}; another application already "
+    "holds it.":
+        "Windows {shortcut} kombinasyonunu Dikte'ye vermedi; başka bir uygulama "
         "onu şimdiden tutuyor.",
     "Cannot read /dev/input. Your user needs to be in the 'input' group:\n"
     "  sudo usermod -aG input $USER   (then log out and back in)":

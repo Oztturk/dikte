@@ -8,6 +8,7 @@ config and now shadows the default.
 
 import json
 import os
+import sys
 import unittest
 from unittest import mock
 
@@ -89,6 +90,8 @@ class Saving(DikteTest):
         cfg.Config().save()
         self.assertTrue(cfg.CONFIG_FILE.exists())
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "NTFS access is decided by ACLs, not by the mode bits")
     def test_the_file_is_readable_by_nobody_else(self):
         """It holds two API keys."""
         cfg.Config().save()
@@ -467,25 +470,33 @@ class Directories(unittest.TestCase):
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c",
                                           "XDG_DATA_HOME": "/d"}):
             config_dir, data_dir = cfg._directories("linux")
-        self.assertEqual(str(config_dir), "/c/dikte")
-        self.assertEqual(str(data_dir), "/d/dikte")
+        self.assertEqual(config_dir.as_posix(), "/c/dikte")
+        self.assertEqual(data_dir.as_posix(), "/d/dikte")
 
     def test_linux_without_the_variables_set(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             config_dir, data_dir = cfg._directories("linux")
-        self.assertTrue(str(config_dir).endswith("/.config/dikte"))
-        self.assertTrue(str(data_dir).endswith("/.local/share/dikte"))
+        self.assertTrue(config_dir.as_posix().endswith("/.config/dikte"))
+        self.assertTrue(data_dir.as_posix().endswith("/.local/share/dikte"))
 
     def test_a_mac_keeps_both_in_application_support(self):
         config_dir, data_dir = cfg._directories("darwin")
         self.assertEqual(config_dir, data_dir)
-        self.assertTrue(str(config_dir).endswith("/Library/Application Support/Dikte"))
+        self.assertTrue(config_dir.as_posix()
+                        .endswith("/Library/Application Support/Dikte"))
 
     def test_a_mac_does_not_read_the_xdg_variables(self):
         """A Mac with them set from some other tool still stores in one place."""
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c"}):
             config_dir, _ = cfg._directories("darwin")
-        self.assertNotIn("/c", str(config_dir))
+        self.assertNotIn("/c", config_dir.as_posix())
+
+    def test_windows_keeps_settings_and_data_apart(self):
+        with mock.patch.dict(os.environ, {"APPDATA": r"C:\roam",
+                                          "LOCALAPPDATA": r"C:\local"}):
+            config_dir, data_dir = cfg._directories("win32")
+        self.assertEqual(config_dir.as_posix(), "C:/roam/Dikte")
+        self.assertEqual(data_dir.as_posix(), "C:/local/Dikte")
 
 
 if __name__ == "__main__":
@@ -519,6 +530,9 @@ class ReadyToRun(DikteTest):
     def setUp(self):
         super().setUp()
         self.patch_attr(ggml, "MODELS_DIR", self.path("models"))
+        # A machine Dikte is actually installed on would otherwise answer for
+        # the "missing program" below through the real install record.
+        self.patch_attr(ggml, "BIN_DIR", self.path("bin"))
 
     def install(self, name):
         path = ggml.whisper_model_path(name)

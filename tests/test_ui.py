@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 
 import cleanup
 import config as cfg
+import ggml
 import hotkey
 import overlay as overlay_module
 import paste
@@ -448,6 +449,13 @@ if __name__ == "__main__":
 
 class LocalModels(DikteTest):
     """The download boxes, without a network and without either program."""
+
+    def setUp(self):
+        super().setUp()
+        # A machine Dikte is actually installed on would otherwise answer the
+        # "nothing can transcribe" question from its real binary and model.
+        self.patch_attr(ggml, "BIN_DIR", self.path("bin"))
+        self.patch_attr(ggml, "MODELS_DIR", self.path("models"))
 
     def window(self, conf):
         window = settings_ui.SettingsWindow(conf)

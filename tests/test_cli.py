@@ -14,6 +14,7 @@ from unittest import mock
 
 import cli
 import config as cfg
+import ggml
 import hotkey
 import ipc
 from tests.support import DikteTest, fake_urlopen
@@ -562,6 +563,28 @@ class Replies(DikteTest):
         with mock.patch.object(ipc, "send", return_value={"ok": True, "legacy": True}), \
                 captured():
             self.assertEqual(cli.run(["cancel"]), 0)
+
+
+class TranscribeRunsHere(DikteTest):
+    """`dikte transcribe` runs in this process, not in the instance."""
+
+    def test_the_local_servers_are_handed_the_settings_first(self):
+        # The GUI does this at startup; a CLI run has no GUI to have done it,
+        # and without it the whisper server holds an empty model name.
+        wav = self.path("clip.wav")
+        wav.write_bytes(b"RIFF not really audio")
+        self.write_config({"local_model": "ggml-base.bin"})
+        self.addCleanup(ggml.whisper.configure,
+                        model="", threads=0, gpu=True, binary="")
+
+        opts = cli.build_parser().parse_args(["transcribe", str(wav)])
+        with mock.patch.object(cli.filetranscribe, "FileTranscriber"), \
+                mock.patch.object(cli, "_headless",
+                                  return_value={"error": "stopped"}), \
+                captured():
+            cli.cmd_transcribe(opts)
+
+        self.assertEqual(ggml.whisper.settings()["model"], "ggml-base.bin")
 
 
 if __name__ == "__main__":

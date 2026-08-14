@@ -17,6 +17,7 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import sys
 import time
 
@@ -134,6 +135,16 @@ def launch_gui(verb=""):
     if verb:
         args.append(verb)
     args.append("--gui")
+    if sys.platform == "win32":
+        # execv on Windows mangles arguments with spaces and would leave the
+        # application tied to this console; start it detached instead.
+        subprocess.Popen(
+            args,
+            creationflags=(subprocess.DETACHED_PROCESS
+                           | subprocess.CREATE_NEW_PROCESS_GROUP),
+            close_fds=True,
+        )
+        sys.exit(0)
     os.execv(sys.executable, args)
 
 
@@ -297,6 +308,9 @@ def cmd_transcribe(opts):
         return fail(opts, f"no such file: {path}")
 
     conf = cfg.Config()
+    # This runs here rather than in the instance, so the local servers have to
+    # be handed their settings here too; the GUI does this at startup.
+    conf.apply_local()
     timestamps = opts.srt or _pick(opts.timestamps, conf["file_timestamps"])
     worker = filetranscribe.FileTranscriber(conf)
 

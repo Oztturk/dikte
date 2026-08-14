@@ -199,6 +199,7 @@ def _output(cmd, timeout, service):
             cmd, cwd=os.path.expanduser("~"), stdin=subprocess.DEVNULL,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except subprocess.TimeoutExpired:
         raise CleanupError(t("{service} did not finish within {seconds} seconds.",

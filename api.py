@@ -18,6 +18,7 @@ import mimetypes
 import os
 import secrets
 import socket
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -148,6 +149,12 @@ def _stop_using(conn):
     if sock is not None:
         with contextlib.suppress(OSError):
             sock.shutdown(socket.SHUT_RDWR)
+        if sys.platform == "win32":
+            # On Windows the shutdown leaves a blocked recv exactly where it
+            # was; only closing the OS handle ends it, and close() on the
+            # object would wait for the blocked reader to let go of it first.
+            with contextlib.suppress(OSError):
+                socket.close(sock.detach())
     with contextlib.suppress(OSError):
         conn.close()
 
@@ -258,7 +265,12 @@ def _multipart(fields, file_field, file_path):
         out += str(value).encode("utf-8") + b"\r\n"
 
     filename = os.path.basename(file_path)
-    ctype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    # The two types a dictation actually sends are pinned: on Windows,
+    # guess_type answers from the registry and differs machine to machine.
+    known = {".wav": "audio/x-wav", ".mp3": "audio/mpeg"}
+    extension = os.path.splitext(filename)[1].lower()
+    ctype = (known.get(extension) or mimetypes.guess_type(filename)[0]
+             or "application/octet-stream")
     with open(file_path, "rb") as fh:
         payload = fh.read()
     out += f"--{boundary}\r\n".encode()

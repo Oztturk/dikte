@@ -30,6 +30,10 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from i18n import t
 
+# Console programs started from a windowless process would otherwise each open
+# a console window of their own on Windows.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+
 RATE = 16000
 CHANNELS = 1
 SAMPLE_WIDTH = 2  # s16
@@ -37,6 +41,19 @@ CHUNK_FRAMES = 1024
 CHUNK_BYTES = CHUNK_FRAMES * SAMPLE_WIDTH * CHANNELS
 CHUNK_LATENCY_MS = round(CHUNK_FRAMES / RATE * 1000)
 MIN_FRAMES = int(RATE * 0.25)
+
+
+def _interrupt(proc):
+    """Ask a recorder process to end.
+
+    SIGINT is the polite way everywhere it exists; Windows has no equivalent a
+    child can be sent, so the process is terminated outright. The captured
+    audio is not lost either way: it has already been read from the pipe.
+    """
+    if sys.platform == "win32":
+        proc.terminate()
+    else:
+        proc.send_signal(signal.SIGINT)
 
 
 class Recorder(QObject):
@@ -70,7 +87,8 @@ class Recorder(QObject):
 
         try:
             self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+                creationflags=NO_WINDOW,
             )
         except OSError as exc:
             self.failed.emit(t("Could not start recording: {error}", error=exc))
@@ -125,7 +143,7 @@ class Recorder(QObject):
         proc = self._proc
         if proc and proc.poll() is None:
             try:
-                proc.send_signal(signal.SIGINT)
+                _interrupt(proc)
                 proc.wait(timeout=1.5)
             except (subprocess.TimeoutExpired, OSError):
                 try:
@@ -246,7 +264,8 @@ class MeetingRecorder(QObject):
             # nobody drains would eventually block it, so it writes to a file.
             self._log = tempfile.TemporaryFile()
             self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=self._log, bufsize=0
+                cmd, stdout=subprocess.PIPE, stderr=self._log, bufsize=0,
+                creationflags=NO_WINDOW,
             )
         except (OSError, wave.Error) as exc:
             self._close_file()
@@ -298,7 +317,7 @@ class MeetingRecorder(QObject):
         proc = self._proc
         if proc and proc.poll() is None:
             try:
-                proc.send_signal(signal.SIGINT)
+                _interrupt(proc)
                 proc.wait(timeout=2)
             except (subprocess.TimeoutExpired, OSError):
                 try:
@@ -603,6 +622,71 @@ def _avfoundation_default_output():
     return ""
 
 
+# Windows records through DirectShow, the one capture API ffmpeg's Windows
+# builds all ship with. What the speakers are playing is not offered as a
+# device at all, so a meeting has nothing to record the far side from yet.
+
+
+def _dshow_devices():
+    """[(name, name)] for every DirectShow audio capture device.
+
+    The list comes out on stderr of a command that then fails, the same
+    documented trick AVFoundation uses above. Names are the only stable handle
+    dshow offers a user; they are what the recorder is given back.
+    """
+    if not shutil.which("ffmpeg"):
+        return []
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-list_devices", "true",
+             "-f", "dshow", "-i", "dummy"],
+            capture_output=True, timeout=8, check=False, creationflags=NO_WINDOW,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+    devices = []
+    for line in result.stderr.decode("utf-8", "replace").splitlines():
+        if "(audio)" not in line:
+            continue
+        match = re.search(r'"([^"]+)"\s*\([^)]*audio[^)]*\)', line)
+        if match:
+            devices.append((match.group(1), match.group(1)))
+    return devices
+
+
+def _dshow_record(target):
+    if not shutil.which("ffmpeg"):
+        return []
+    # dshow has no "default" device: an unset target means the first one listed.
+    device = target
+    if not device:
+        inputs = _dshow_devices()
+        if not inputs:
+            return []
+        device = inputs[0][0]
+    return [
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
+        # dshow holds half a second of audio before handing anything over;
+        # asked for the chunk the level meter is measured in instead.
+        "-f", "dshow", "-audio_buffer_size", str(CHUNK_LATENCY_MS),
+        "-i", f"audio={device}",
+        "-ac", str(CHANNELS), "-ar", str(RATE), "-f", "s16le", "-",
+    ]
+
+
+def _dshow_meeting(mic_target, system_target):
+    return []  # no monitor devices to record the far side from
+
+
+def _dshow_no_outputs():
+    return []
+
+
+def _dshow_no_default_output():
+    return ""
+
+
 Sound = collections.namedtuple(
     "Sound",
     # How to capture one source and two at once, the two device lists, which
@@ -633,9 +717,24 @@ COREAUDIO = Sound(
 )
 
 
+DSHOW = Sound(
+    record=_dshow_record,
+    meeting=_dshow_meeting,
+    inputs=_dshow_devices,
+    outputs=_dshow_no_outputs,
+    default_output=_dshow_no_default_output,
+    missing="ffmpeg or a microphone was not found. Install ffmpeg with: "
+            "winget install Gyan.FFmpeg",
+)
+
+
 def sound():
     """The programs this machine records through."""
-    return COREAUDIO if sys.platform == "darwin" else PULSE
+    if sys.platform == "darwin":
+        return COREAUDIO
+    if sys.platform == "win32":
+        return DSHOW
+    return PULSE
 
 
 def list_sources():

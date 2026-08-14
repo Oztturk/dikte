@@ -606,5 +606,83 @@ class MacRecordingCommand(OnMacOS, DikteTest):
         self.assertFalse(recorder.active)
 
 
+class OnWindows:
+    """A test that runs as if the machine ran Windows."""
+
+    def setUp(self):
+        super().setUp()
+        self.enterContext(mock.patch.object(sys, "platform", "win32"))
+
+
+class WindowsDevices(OnWindows, DikteTest):
+    """The one ffmpeg listing the device questions are answered from.
+
+    dshow names devices rather than numbering them, and the names carry
+    whatever alphabet the machine speaks, so the listing here does too.
+    """
+
+    LISTING = (
+        '[dshow @ 0000020c] "Integrated Camera" (video)\n'
+        '[dshow @ 0000020c]   Alternative name "@device_pnp_\\...."\n'
+        '[dshow @ 0000020c] "Mikrofon Dizisi (Intel Smart Sound)" (audio)\n'
+        '[dshow @ 0000020c]   Alternative name "@device_cm_{33D9A762}...."\n'
+        '[dshow @ 0000020c] "Kulaklık (Soundcore Life Q30)" (audio)\n'
+        "dummy: Immediate exit requested\n"
+    ).encode("utf-8")
+
+    @contextlib.contextmanager
+    def listing(self, stderr=None, tools=("ffmpeg",)):
+        completed = FakeCompleted(
+            returncode=1, stderr=self.LISTING if stderr is None else stderr)
+        with only_these_tools(*tools), \
+                mock.patch.object(subprocess, "run", return_value=completed):
+            yield
+
+    def test_windows_records_through_dshow(self):
+        self.assertIs(audio.sound(), audio.DSHOW)
+
+    def test_the_audio_lines_are_the_only_ones_read(self):
+        with self.listing():
+            self.assertEqual(audio.list_sources(), [
+                ("Mikrofon Dizisi (Intel Smart Sound)",
+                 "Mikrofon Dizisi (Intel Smart Sound)"),
+                ("Kulaklık (Soundcore Life Q30)",
+                 "Kulaklık (Soundcore Life Q30)"),
+            ])
+
+    def test_no_ffmpeg_installed(self):
+        with only_these_tools():
+            self.assertEqual(audio.list_sources(), [])
+            self.assertEqual(audio.recording_command(), [])
+
+    def test_the_name_is_what_the_recorder_is_given_back(self):
+        with self.listing():
+            cmd = audio.recording_command("Kulaklık (Soundcore Life Q30)")
+        self.assertEqual(cmd[cmd.index("-f") + 1], "dshow")
+        self.assertIn("audio=Kulaklık (Soundcore Life Q30)", cmd)
+
+    def test_no_microphone_named_means_the_first_one_listed(self):
+        """dshow has no default device for an empty target to mean."""
+        with self.listing():
+            self.assertIn("audio=Mikrofon Dizisi (Intel Smart Sound)",
+                          audio.recording_command())
+
+    def test_a_machine_with_no_microphone_at_all(self):
+        with self.listing(stderr=b'[dshow @ 0] "Integrated Camera" (video)\n'):
+            self.assertEqual(audio.recording_command(), [])
+
+    def test_an_ffmpeg_that_will_not_run(self):
+        with only_these_tools("ffmpeg"), \
+                mock.patch.object(subprocess, "run", side_effect=OSError("nope")):
+            self.assertEqual(audio.list_sources(), [])
+
+    def test_nothing_offers_the_far_side_of_a_meeting(self):
+        """What the speakers play is not a capture device Windows hands out."""
+        with self.listing():
+            self.assertEqual(audio.list_monitors(), [])
+            self.assertEqual(audio.default_monitor(), "")
+            self.assertEqual(audio.meeting_command("mic", "sys"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

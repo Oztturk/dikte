@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import socket
+import subprocess
 import sys
 import threading
 
@@ -881,6 +882,17 @@ class Dikte:
             self.settings_window.close()
         self.shutdown()
         QLocalServer.removeServer(SERVER_NAME)
+        if sys.platform == "win32":
+            # execv on Windows mangles arguments with spaces and leaves the two
+            # processes sharing a console; a detached start does neither.
+            subprocess.Popen(
+                [sys.executable, ipc.script_path(), "--gui"],
+                creationflags=(subprocess.DETACHED_PROCESS
+                               | subprocess.CREATE_NEW_PROCESS_GROUP),
+                close_fds=True,
+            )
+            QApplication.instance().quit()
+            return
         os.execv(sys.executable, [sys.executable, ipc.script_path(), "--gui"])
 
     def shutdown(self):
@@ -951,7 +963,11 @@ def install_signal_handlers(app):
         app.quit()          # aboutToQuit runs shutdown()
 
     notifier.activated.connect(woken)
-    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    # SIGHUP does not exist on Windows, and neither does a session to hang up.
+    signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):
+        signals.append(signal.SIGHUP)
+    for sig in signals:
         # A handler that does nothing, so that the default action, stopping the
         # process where it stands, is replaced by the wakeup above.
         signal.signal(sig, lambda *_: None)

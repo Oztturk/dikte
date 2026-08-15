@@ -226,7 +226,7 @@ class InstallProgram(Local):
         with fake_urlopen(listing):
             with self.assertRaises(ggml.LocalError) as caught:
                 ggml.install_program(ggml.WHISPER)
-        self.assertIn("brew install whisper-cpp", str(caught.exception))
+        self.assertIn("Build whisper-server yourself", str(caught.exception))
 
     def test_a_mac_uses_the_native_llama_archive_instead_of_ubuntu(self):
         self.patch_attr(sys, "platform", "darwin")

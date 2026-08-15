@@ -45,14 +45,17 @@ import urllib.error
 import urllib.request
 
 import hub
+import paths
 from i18n import t
 
 HOST = "127.0.0.1"
 # The path api.py asks for, so its URL and the server's line up.
 INFERENCE_PATH = "/v1/audio/transcriptions"
 
-DATA_DIR = (pathlib.Path(os.environ.get("XDG_DATA_HOME")
-                         or os.path.expanduser("~/.local/share")) / "dikte")
+# Not worked out here: a Mac keeps its data under ~/Library, and a copy of the
+# rule that did not know that put several gigabytes of models somewhere no Mac
+# user looks and uninstall.sh never deleted from.
+DATA_DIR = paths.DATA_DIR
 BIN_DIR = DATA_DIR / "bin"
 MODELS_DIR = DATA_DIR / "models"
 
@@ -319,10 +322,17 @@ def install_program(program, tag="", on_progress=None, should_stop=None,
         if item:
             break
     if item is None:
+        # Nothing to download and nothing to install for you: whisper.cpp
+        # publishes no macOS binary, and Homebrew's whisper-cpp is configured
+        # with WHISPER_BUILD_SERVER=OFF, so it is whisper-cli that lands and not
+        # the server Dikte talks to. Building it is a cmake line, and the
+        # binary is picked up from the PATH or from the box above, the same way
+        # a distribution's own build is on Linux.
         if sys.platform == "darwin" and program is WHISPER:
             raise LocalError(t(
-                "whisper.cpp publishes no macOS build. Install it with: "
-                "brew install whisper-cpp"
+                "whisper.cpp has no macOS build, and Homebrew's leaves out the "
+                "server. Build whisper-server yourself and give its path here, "
+                "or transcribe in the cloud. See the README."
             ))
         raise LocalError(t("{repo} {tag} has no build for this machine.",
                            repo=program.repo, tag=tag))

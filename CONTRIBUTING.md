@@ -70,7 +70,7 @@ there can tell that apart from an empty device list, which only means the tool
 that lists them is not installed.
 
 The tests are split along the same line, and almost none of them are skipped.
-1104 of the 1147 run on any machine, including every line of the Wayland, X11,
+1084 of the 1147 run on any machine, including every line of the Wayland, X11,
 macOS and Windows backends: the programs are faked at `shutil.which`, the
 frameworks and system libraries at the one function that loads them
 (`paste._win_api`, `hotkey._win_input`). A test class says which system it is
@@ -88,8 +88,11 @@ is sitting at. What the systems owe in common is written once as a contract
 class and subclassed by each of them.
 
 The 43 that do carry `@linux_only` are the ones that would need the real thing:
-the `/dev/input` listener, KDE's shortcut file, GNOME's gsettings. Mark a test
-that way only when faking it would leave nothing to test. A test that quietly
+the `/dev/input` listener, KDE's shortcut file, GNOME's gsettings. The 20 with
+`@posix_only` are `integrate.py`, the menu entry and the login item a downloaded
+build writes for itself: there are two downloads, an AppImage and a disk image,
+so that module has no Windows half for a Windows host to check. Mark a test
+either way only when faking it would leave nothing to test. A test that quietly
 stops running on the platform you are porting to protects nothing.
 
 ## What a pull request should carry

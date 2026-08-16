@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 from dikte import integrate
+from tests.support import posix_only
 
 
 class Frozen:
@@ -75,6 +76,7 @@ class WhatToStart(unittest.TestCase):
     def test_a_checkout_names_this_interpreter_and_the_entry_point(self):
         self.assertFalse(integrate.packaged())
 
+    @posix_only
     def test_an_appimage_names_the_file_and_not_the_mount(self):
         """The mount is a fresh /tmp path every run; a shortcut written to it
         would work until the next login and never again."""
@@ -83,6 +85,7 @@ class WhatToStart(unittest.TestCase):
             self.assertEqual(str(integrate.target()),
                              "/home/someone/Downloads/Dikte.AppImage")
 
+    @posix_only
     def test_a_mac_names_the_bundle_and_not_the_executable_inside_it(self):
         with Frozen("/Applications/Dikte.app/Contents/MacOS/Dikte",
                     platform="darwin"):
@@ -95,6 +98,7 @@ class WhatToStart(unittest.TestCase):
 class BundledTools(unittest.TestCase):
     """The ffmpeg the disk image carries, and how anything finds it."""
 
+    @posix_only
     def test_a_mac_looks_beside_the_bundle_not_beside_the_executable(self):
         with Frozen("/Applications/Dikte.app/Contents/MacOS/Dikte",
                     platform="darwin"):
@@ -213,6 +217,7 @@ class Certificates(unittest.TestCase):
             self.assertIsNone(integrate.use_system_certificates())
 
 
+@posix_only
 class Linux(Home):
     def install(self, appimage, force=False):
         with Frozen("/tmp/.mount_x/usr/bin/dikte", appimage=str(appimage),
@@ -348,6 +353,7 @@ class Linux(Home):
             self.assertEqual(integrate.ensure(), [])
 
 
+@posix_only
 class MacOS(Home):
     def agent(self):
         return self.home / "Library/LaunchAgents/io.github.yusufipk.dikte.plist"

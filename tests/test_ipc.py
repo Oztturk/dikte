@@ -8,6 +8,7 @@ answers by saying nothing at all.
 import json
 import os
 import pathlib
+import shlex
 import sys
 import unittest
 from unittest import mock
@@ -65,9 +66,10 @@ class Paths(unittest.TestCase):
         self.assertTrue(os.path.exists(ipc.script_path()))
 
     def test_the_shortcut_command_runs_it_with_this_interpreter(self):
-        command = ipc.command_for("toggle")
-        self.assertTrue(command.startswith(sys.executable))
-        self.assertTrue(command.endswith(" toggle"))
+        # Read back through the same quoting it went out with: a Windows path
+        # is spelled with backslashes and comes out of the join quoted.
+        self.assertEqual(shlex.split(ipc.command_for("toggle")),
+                         [sys.executable, ipc.script_path(), "toggle"])
 
     def test_a_packaged_build_names_itself_and_no_interpreter(self):
         """There is no __main__.py on disk in one, and sys.executable is the

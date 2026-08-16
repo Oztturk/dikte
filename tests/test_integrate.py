@@ -158,6 +158,61 @@ class LibraryPath(unittest.TestCase):
             self.assertFalse(integrate.restore_library_path())
 
 
+class Certificates(unittest.TestCase):
+    """Where a build looks for the certificates that say who it is talking to.
+
+    An AppImage built on Ubuntu carries an OpenSSL with /usr/lib/ssl compiled
+    into it, and Arch, Fedora and openSUSE have no such directory. Left alone
+    it is every HTTPS request failing at once, reported as a rejected key.
+    """
+
+    def paths(self, cafile=None, capath=None):
+        """ssl.get_default_verify_paths(), which reports only what really exists."""
+        import ssl
+        return mock.patch("ssl.get_default_verify_paths",
+                          return_value=ssl.DefaultVerifyPaths(
+                              cafile, capath, "SSL_CERT_FILE", "/usr/lib/ssl/cert.pem",
+                              "SSL_CERT_DIR", "/usr/lib/ssl/certs"))
+
+    def test_a_store_the_build_cannot_find_is_looked_up(self):
+        with Frozen("/tmp/.mount_x/usr/bin/dikte"), \
+             mock.patch.dict(os.environ, {}, clear=True), \
+             self.paths(), \
+             mock.patch("os.path.isfile", lambda p: p == "/etc/ssl/cert.pem"):
+            self.assertEqual(integrate.use_system_certificates(), "/etc/ssl/cert.pem")
+            self.assertEqual(os.environ["SSL_CERT_FILE"], "/etc/ssl/cert.pem")
+
+    def test_a_directory_will_do_when_no_bundle_is_there(self):
+        with Frozen("/tmp/.mount_x/usr/bin/dikte"), \
+             mock.patch.dict(os.environ, {}, clear=True), \
+             self.paths(), \
+             mock.patch("os.path.isfile", return_value=False), \
+             mock.patch("os.path.isdir", lambda p: p == "/etc/ssl/certs"):
+            self.assertEqual(integrate.use_system_certificates(), "/etc/ssl/certs")
+            self.assertEqual(os.environ["SSL_CERT_DIR"], "/etc/ssl/certs")
+
+    def test_a_build_that_can_already_find_them_is_left_alone(self):
+        """Which is the AppImage running on the distribution it was built on."""
+        with Frozen("/tmp/.mount_x/usr/bin/dikte"), \
+             mock.patch.dict(os.environ, {}, clear=True), \
+             self.paths(capath="/usr/lib/ssl/certs"):
+            self.assertIsNone(integrate.use_system_certificates())
+            self.assertNotIn("SSL_CERT_FILE", os.environ)
+
+    def test_somebody_who_has_said_where_is_not_argued_with(self):
+        """A network that inspects its own traffic is made to work this way."""
+        with Frozen("/tmp/.mount_x/usr/bin/dikte"), \
+             mock.patch.dict(os.environ, {"SSL_CERT_FILE": "/opt/work/ca.pem"},
+                             clear=True), \
+             self.paths():
+            self.assertIsNone(integrate.use_system_certificates())
+            self.assertEqual(os.environ["SSL_CERT_FILE"], "/opt/work/ca.pem")
+
+    def test_a_checkout_uses_the_python_it_was_installed_against(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(integrate.use_system_certificates())
+
+
 class Linux(Home):
     def install(self, appimage, force=False):
         with Frozen("/tmp/.mount_x/usr/bin/dikte", appimage=str(appimage),

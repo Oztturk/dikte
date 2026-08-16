@@ -14,6 +14,12 @@ Everything is written from the path Dikte is running as, which is why it is
 also run again on every start rather than once: an AppImage that was moved out
 of ~/Downloads leaves behind a menu entry naming a file that is no longer
 there, and the run after the move is the only moment that can be noticed.
+
+The rest of the module is the other half of the same meeting. A build carries
+the libraries and the OpenSSL of the machine it was built on, and both of them
+have to be reconciled with the machine it is running on before anything else
+happens: what it hands to the programs it starts, and where it looks for the
+certificates that say who it is talking to.
 """
 
 import os
@@ -87,6 +93,53 @@ def restore_library_path():
             del os.environ[name]
         moved = True
     return moved
+
+
+# Where the distributions keep the trust store. One list rather than a guess
+# per distribution, in the order curl and Go try them.
+CA_FILES = (
+    "/etc/ssl/certs/ca-certificates.crt",   # Debian, Ubuntu, Arch, Gentoo
+    "/etc/pki/tls/certs/ca-bundle.crt",     # Fedora, RHEL
+    "/etc/ssl/ca-bundle.pem",               # openSUSE
+    "/etc/ssl/cert.pem",                    # Alpine, and macOS
+)
+CA_DIRECTORIES = ("/etc/ssl/certs", "/etc/pki/tls/certs")
+
+
+def use_system_certificates():
+    """Point the OpenSSL in this build at the machine's trust store. What it found.
+
+    A build carries the OpenSSL of the machine it was built on, and that
+    OpenSSL has one directory compiled into it as the only place it will look:
+    /usr/lib/ssl for an AppImage built on Ubuntu, which does not exist on Arch,
+    Fedora or openSUSE. Every HTTPS request then fails with
+    CERTIFICATE_VERIFY_FAILED, which reads like a rejected API key rather than
+    a packaging fault, and takes the model downloads down with it.
+
+    The machine's own store rather than a copy carried along: a copy goes stale
+    as roots are rotated, and it would ignore a certificate somebody added
+    themselves, which is how a network that inspects its own traffic is made to
+    work. Anybody who has already said where to look is not argued with.
+    """
+    if not packaged():
+        return None
+    if os.environ.get("SSL_CERT_FILE") or os.environ.get("SSL_CERT_DIR"):
+        return None
+
+    import ssl
+    # Both of these are None unless the path they name is really there, so this
+    # asks whether the build's idea of where certificates live survived the trip.
+    defaults = ssl.get_default_verify_paths()
+    if defaults.cafile or defaults.capath:
+        return None
+
+    for name, candidates, exists in (("SSL_CERT_FILE", CA_FILES, os.path.isfile),
+                                     ("SSL_CERT_DIR", CA_DIRECTORIES, os.path.isdir)):
+        for candidate in candidates:
+            if exists(candidate):
+                os.environ[name] = candidate
+                return candidate
+    return None
 
 
 def bundled_bin():

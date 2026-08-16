@@ -906,9 +906,12 @@ class Dikte:
         self.shutdown()
         # Stop answering before the replacement is started, not just afterwards.
         # execv leaves nothing behind to answer, but a Windows restart is two
-        # processes for a moment, and a new one that reached a server still
-        # listening would take itself for the second copy, hand its command over
-        # and exit, leaving nothing running at all.
+        # processes for a moment, and removeServer does nothing about a name
+        # another process is holding. The new one then either opens a second
+        # server on a name the old one is still answering on, so that a command
+        # arriving in that moment reaches the process that is going away, or
+        # fails to open one at all and says so to a console nobody is watching.
+        # Closing first leaves neither.
         if self.server is not None:
             self.server.close()
         QLocalServer.removeServer(SERVER_NAME)

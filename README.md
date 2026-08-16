@@ -5,7 +5,8 @@ machine by default, a model cleans it up (dropping the *uh*s, the restarts, the
 missing punctuation), and the result lands in your clipboard and is pasted into
 whatever window you were typing in.
 
-Built for KDE Plasma 6 on Wayland, and runs on GNOME X11 and macOS too. No
+Built for KDE Plasma 6 on Wayland, and runs on GNOME X11, macOS and any other
+Linux desktop that will let it read the keyboard. No
 dependencies beyond system packages: just the Python standard library, 3.11 or
 newer, and PyQt6.
 
@@ -184,14 +185,19 @@ running.
   right-click to delete.
 - **Turkish and English interface**, following the system locale by default.
 
-## The global shortcuts need one logout
+## The global shortcuts, and the logout KDE needs
 
 KWin only reads `kglobalshortcutsrc` at startup, so the shortcuts `install.sh`
 writes will not fire until you log out and back in. Until then, Settings →
 Shortcuts → **built-in listener** reads `/dev/input` and catches the combination
 itself. The difference: it does not swallow the key, so `Ctrl+Space` also reaches
 the focused application (some editors will pop up autocomplete). The listener
-needs your user in the `input` group: `sudo usermod -aG input $USER`.
+needs your user in the `input` group: `sudo usermod -aG input $USER`. On GNOME
+the shortcut works the moment it is installed, and on a desktop that keeps no
+registry at all (i3, XFCE, sway and most others) the listener is the whole
+mechanism: nothing is installed, nothing waits for a logout, and Settings →
+Shortcuts shows the command to bind if you would rather your desktop owned the
+keys.
 
 ## Layout
 
@@ -211,7 +217,7 @@ vad.py            deciding whether a recording holds speech at all
 filetranscribe.py file transcription: ffmpeg, chunking, timestamps
 overlay.py        the corner indicator
 settings_ui.py    settings window
-hotkey.py         KDE shortcut installation, the evdev listener, Carbon on a Mac
+hotkey.py         the desktop's shortcut registry, the evdev listener, Carbon on a Mac
 paste.py          wl-clipboard and ydotool wrappers, pbcopy and CoreGraphics
 trayicon.py       the tray icons, drawn where there is no icon theme
 i18n.py           the string table

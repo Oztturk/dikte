@@ -308,6 +308,8 @@ TR = {
     "Registered in KDE: {shortcut}": "KDE'de kayıtlı: {shortcut}",
     "No KDE shortcut installed.": "KDE kısayolu kurulu değil.",
     "Registered in {desktop}: {shortcut}": "{desktop}'da kayıtlı: {shortcut}",
+    "Held by Dikte while it runs: {shortcut}":
+        "Dikte çalıştığı sürece tutuyor: {shortcut}",
     "No global shortcut installed.": "Global kısayol kurulu değil.",
     "No global shortcut installed. The tray menu starts a meeting too.":
         "Global kısayol kurulu değil. Toplantı tepsi menüsünden de başlatılabilir.",
@@ -351,6 +353,18 @@ TR = {
     "meantime.":
         "Dikte bu kombinasyonları çalışırken macOS'tan kendisi ister. Hiçbir şey "
         "kurulmaz ve o sırada başka hiçbir uygulama bu tuşları almaz.",
+    "{desktop} keeps no shortcut registry, so Dikte listens for these "
+    "combinations itself while it is running. Your user has to be able to read "
+    "/dev/input for that, and the focused application receives the keys as "
+    "well. To have the desktop own them instead, bind this command in its own "
+    "configuration, with the last word swapped for pause, cancel, ask or "
+    "meeting:":
+        "{desktop} kısayol kaydı tutmaz, bu yüzden Dikte bu kombinasyonları "
+        "çalıştığı sürece kendisi dinler. Bunun için kullanıcının /dev/input'u "
+        "okuyabilmesi gerekir, ayrıca tuşlar odaktaki uygulamaya da iletilir. "
+        "Tuşları masaüstünün sahiplenmesini istersen, son kelimeyi pause, "
+        "cancel, ask veya meeting ile değiştirerek şu komutu kendi "
+        "yapılandırmasında bir tuşa bağla:",
     "Shortcut conflict": "Kısayol çakışması",
     "{shortcut} is also used by:\n\n{list}\n\nInstall anyway?":
         "{shortcut} şu girdilerde de kullanılıyor:\n\n{list}\n\nYine de kurulsun mu?",
@@ -367,6 +381,12 @@ TR = {
     "running, so it works as soon as the settings are saved.":
         "Kısayol kaydedildi: {shortcut}\nDikte bunu çalıştığı sürece kendisi "
         "tutar, yani ayarlar kaydedilir kaydedilmez çalışır.",
+    "Shortcut saved: {shortcut}\n{desktop} has no shortcut registry to install "
+    "into, so Dikte listens for this one itself while it is running. It works "
+    "as soon as the settings are saved.":
+        "Kısayol kaydedildi: {shortcut}\n{desktop} kurulacak bir kısayol kaydı "
+        "tutmadığı için Dikte bunu çalıştığı sürece kendisi dinler. Ayarlar "
+        "kaydedilir kaydedilmez çalışır.",
     "Could not reach the macOS shortcut service: {error}":
         "macOS kısayol servisine ulaşılamadı: {error}",
     "macOS would not give Dikte {shortcut}; another application already holds it.":

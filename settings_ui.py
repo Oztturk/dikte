@@ -1363,15 +1363,34 @@ class SettingsWindow(QDialog):
             )
         elif hotkey.installs_shortcuts():
             explanation = t("The shortcut starts working as soon as it is installed.")
-        else:
+        elif hotkey.backend() == hotkey.MACOS:
             explanation = t(
                 "Dikte asks macOS for these combinations itself, while it is "
                 "running. Nothing is installed, and no other application receives "
                 "them in the meantime."
             )
+        else:
+            # The desktops nobody writes a backend for. Saying "installed" here
+            # would be the old bug in words: there is no registry, the listener
+            # is the whole mechanism, and both of its costs are permanent
+            # rather than lasting until the next login.
+            explanation = t(
+                "{desktop} keeps no shortcut registry, so Dikte listens for "
+                "these combinations itself while it is running. Your user has "
+                "to be able to read /dev/input for that, and the focused "
+                "application receives the keys as well. To have the desktop own "
+                "them instead, bind this command in its own configuration, with "
+                "the last word swapped for pause, cancel, ask or meeting:",
+                desktop=hotkey.desktop_name(),
+            )
         note = QLabel(explanation)
         note.setWordWrap(True)
         layout.addWidget(note)
+        if hotkey.backend() == hotkey.LISTENER:
+            command = QLineEdit(ipc.command_for("toggle"))
+            command.setReadOnly(True)
+            command.setCursorPosition(0)
+            layout.addWidget(command)
         layout.addStretch(1)
         return page
 
@@ -1442,7 +1461,7 @@ class SettingsWindow(QDialog):
         """The field a global shortcut is typed or picked in."""
         box = QComboBox()
         box.setEditable(True)
-        box.addItems(MAC_SHORTCUTS if hotkey.desktop_name() == "macOS"
+        box.addItems(MAC_SHORTCUTS if hotkey.backend() == hotkey.MACOS
                      else SHORTCUTS)
         box.setCurrentText("")
         if placeholder:
@@ -1491,8 +1510,9 @@ class SettingsWindow(QDialog):
     def _install_buttons(install_handler, remove_handler):
         """Install and Remove, where this system has somewhere to install into.
 
-        macOS has not: Dikte asks for the combination itself while it runs, so
-        there is nothing to write down and nothing to take back out.
+        macOS has not, and neither has a Linux desktop that keeps no registry:
+        Dikte holds the combination itself while it runs, so there is nothing
+        to write down and nothing to take back out.
         """
         if not hotkey.installs_shortcuts():
             return []
@@ -1990,11 +2010,16 @@ class SettingsWindow(QDialog):
     def _refresh_shortcut_status(self, which):
         _box, status, missing = self._shortcut_rows[which]
         current = hotkey.shortcut_status(hotkey.SHORTCUTS[which].desktop_id)
-        status.setText(
-            t("Registered in {desktop}: {shortcut}",
-              desktop=hotkey.desktop_name(), shortcut=current) if current
-            else missing
-        )
+        if not current:
+            status.setText(missing)
+        elif hotkey.installs_shortcuts():
+            status.setText(t("Registered in {desktop}: {shortcut}",
+                             desktop=hotkey.desktop_name(), shortcut=current))
+        else:
+            # Nothing was written anywhere: this is the combination the running
+            # process is holding, which is the only sense in which it exists.
+            status.setText(t("Held by Dikte while it runs: {shortcut}",
+                             shortcut=current))
 
     def _cleanup_provider_changed(self):
         provider = self.cleanup_provider.currentData() or "openrouter"

@@ -142,11 +142,28 @@ if python3 -c 'import PyQt6.QtWidgets' 2>/dev/null; then
   if [[ -n "$CANCEL_SHORTCUT" ]]; then
     register cancel "$CANCEL_SHORTCUT" "Discard the recording"
   fi
-  if [[ "${XDG_CURRENT_DESKTOP:-}" != *[Gg][Nn][Oo][Mm][Ee]* ]]; then
-    warn "KWin only reads these at startup, so they go live after your next"
-    say  "login. Until then open Settings → Shortcuts and turn on the"
-    say  "built-in listener to use them right away."
-  fi
+  # Which of the three mechanisms this session got is Dikte's answer to give,
+  # not this script's. Guessing from XDG_CURRENT_DESKTOP here is how every
+  # session that was neither GNOME nor KDE used to be promised a KWin that was
+  # never running.
+  case "$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import hotkey; print(hotkey.backend())' "$DIR" 2>/dev/null)" in
+    kde)
+      warn "KWin only reads these at startup, so they go live after your next"
+      say  "login. Until then open Settings → Shortcuts and turn on the"
+      say  "built-in listener to use them right away."
+      ;;
+    gnome) ;;
+    *)
+      if id -nG 2>/dev/null | tr ' ' '\n' | grep -qx input; then
+        say "Your desktop keeps no shortcut registry, so Dikte listens for these"
+        say "keys itself while it is running."
+      else
+        warn "Your desktop keeps no shortcut registry, so Dikte listens for these"
+        say  "keys itself, and it cannot read /dev/input yet:"
+        say  "  sudo usermod -aG input $(id -un)   (then log out and back in)"
+      fi
+      ;;
+  esac
 else
   warn "PyQt6 is missing, so no shortcut was registered. Install it, then run:"
   say  "dikte shortcut install toggle --combo '$SHORTCUT'"

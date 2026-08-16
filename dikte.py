@@ -365,8 +365,8 @@ class Dikte:
 
     def _external(self, name, handler):
         # The built-in listener sees the key press the instant it happens, so a
-        # toggle arriving right behind one is the KDE shortcut catching up on
-        # that same press. Its lateness is also the proof we were waiting for
+        # toggle arriving right behind one is the desktop's own shortcut catching
+        # up on that same press. Its lateness is also the proof we were waiting for
         # that the shortcut is live, which leaves the listener with nothing to
         # do but double every press.
         # Where nothing was installed there is no shortcut to catch up, and

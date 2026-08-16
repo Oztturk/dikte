@@ -84,17 +84,24 @@ echo "──────────────────"
 
 # 1. Global shortcuts ------------------------------------------------------
 # Handed to Dikte while it can still run, because it is the half that knows
-# whether they went into KDE's kglobalshortcutsrc or GNOME's gsettings. macOS
-# keeps no registry: the combinations are held by the running process and are
-# gone the moment it stops, so there is nothing here to take back.
+# whether they went into KDE's kglobalshortcutsrc, GNOME's gsettings, or
+# nowhere at all. macOS and the desktops with no registry hold the combinations
+# in the running process, where they are gone the moment it stops, so there is
+# nothing there to take back.
 if ((MACOS)); then
   say "Nothing to unregister: macOS shortcuts live only while Dikte runs."
 elif [[ -n "$PY" ]] && "$PY" -c 'import PyQt6.QtWidgets' 2>/dev/null; then
   for which in toggle pause cancel ask meeting; do
     "$PY" "$DIR/dikte.py" shortcut remove "$which" >/dev/null 2>&1 || true
   done
-  ok "Global shortcuts unregistered"
-  say "KWin reads that file at startup, so the keys are free after your next login."
+  case "$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import hotkey; print(hotkey.backend())' "$DIR" 2>/dev/null)" in
+    kde)
+      ok  "Global shortcuts unregistered"
+      say "KWin reads that file at startup, so the keys are free after your next login."
+      ;;
+    gnome) ok "Global shortcuts unregistered" ;;
+    *) say "Nothing to unregister: Dikte listened for the keys itself, and they stop with it." ;;
+  esac
 else
   warn "PyQt6 is missing, so the shortcuts were left registered."
   say  "Remove them in your desktop's shortcut settings."

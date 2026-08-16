@@ -358,6 +358,12 @@ class MacOS(Home):
              mock.patch.object(integrate, "_launchctl_reload"):
             return integrate.install(force=force)
 
+    def remove(self):
+        with Frozen("/Applications/Dikte.app/Contents/MacOS/Dikte",
+                    home=self.home, platform="darwin"), \
+             mock.patch("subprocess.run"):
+            return integrate.remove()
+
     def test_it_writes_a_login_item_and_the_command(self):
         app = self.home / "Applications" / "Dikte.app"
         (app / "Contents/MacOS").mkdir(parents=True)
@@ -417,6 +423,25 @@ class MacOS(Home):
         app = self.home / "Applications" / "Dikte.app"
         (app / "Contents/MacOS").mkdir(parents=True)
         self.install(app)
+        self.assertIn("install-mac.sh", command.read_text())
+
+    def test_removing_takes_back_the_login_item_and_command_it_wrote(self):
+        app = self.home / "Applications" / "Dikte.app"
+        (app / "Contents/MacOS").mkdir(parents=True)
+        self.install(app)
+        command = self.home / ".local/bin/dikte"
+
+        self.assertEqual(self.remove(), [self.agent(), command])
+        self.assertFalse(self.agent().exists())
+        self.assertFalse(command.exists())
+
+    def test_removing_leaves_another_installers_command_alone(self):
+        command = self.home / ".local/bin/dikte"
+        command.parent.mkdir(parents=True)
+        command.write_text("#!/bin/sh\n# Written by install-mac.sh.\n"
+                           "exec /usr/local/bin/python3 /src/__main__.py \"$@\"\n")
+
+        self.assertEqual(self.remove(), [])
         self.assertIn("install-mac.sh", command.read_text())
 
 

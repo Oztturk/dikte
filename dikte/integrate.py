@@ -34,6 +34,7 @@ import sys
 AGENT_ID = "io.github.yusufipk.dikte"
 ICON_NAME = "dikte"
 DESKTOP_FILE = "dikte.desktop"
+MACOS_COMMAND_MARKER = "# Written by Dikte itself. Delete it to be rid of it.\n"
 
 
 def packaged():
@@ -398,6 +399,20 @@ def _agent_path():
     return pathlib.Path.home() / "Library" / "LaunchAgents" / f"{AGENT_ID}.plist"
 
 
+def _macos_command_path():
+    return pathlib.Path.home() / ".local" / "bin" / "dikte"
+
+
+def _macos_command_is_ours(command):
+    """Whether this is the wrapper a downloaded Mac build wrote itself."""
+    try:
+        return command.is_file() and MACOS_COMMAND_MARKER in command.read_text(
+            encoding="utf-8"
+        )
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def _agent_plist(app):
     """Through `open` rather than the executable inside the bundle, so that the
     process is one LaunchServices started: that is what gives it the bundle's
@@ -449,13 +464,13 @@ def _macos_install(app, force=False):
     # The command, as a wrapper rather than a symlink: the executable has to be
     # run from inside the bundle for macOS to file its permissions under Dikte,
     # and a symlink somewhere else is a different process to macOS.
-    command = pathlib.Path.home() / ".local" / "bin" / "dikte"
+    command = _macos_command_path()
     binary = app / "Contents" / "MacOS" / "Dikte"
-    marker = "# Written by Dikte itself. Delete it to be rid of it.\n"
-    script = f'#!/bin/sh\n{marker}exec {shlex.quote(str(binary))} "$@"\n'
+    script = (f'#!/bin/sh\n{MACOS_COMMAND_MARKER}'
+              f'exec {shlex.quote(str(binary))} "$@"\n')
     # install-mac.sh writes its own wrapper here, naming the checkout's Python.
     # Ours only replaces a wrapper it wrote before, or nothing at all.
-    ours = command.exists() and marker in command.read_text(encoding="utf-8")
+    ours = _macos_command_is_ours(command)
     if (not command.exists() or ours or force) and _write(command, script):
         command.chmod(0o755)
         written.append(command)
@@ -470,6 +485,10 @@ def _macos_remove():
                        capture_output=True, check=False)
         agent.unlink()
         gone.append(agent)
+    command = _macos_command_path()
+    if _macos_command_is_ours(command):
+        command.unlink()
+        gone.append(command)
     return gone
 
 

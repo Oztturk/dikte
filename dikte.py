@@ -88,6 +88,9 @@ class Dikte:
         self.meeting_base = ""
         self.meeting_message = ""
         self.settings_window = None
+        # The single-instance server, handed over once run_app has opened it, so
+        # that a restart can stop answering before the replacement starts.
+        self.server = None
         self._quitting = False
         # A request that asked to be told how its run ended waits in here until
         # the run gets there, keyed by which of the three it was waiting on.
@@ -901,6 +904,13 @@ class Dikte:
         if self.settings_window is not None:
             self.settings_window.close()
         self.shutdown()
+        # Stop answering before the replacement is started, not just afterwards.
+        # execv leaves nothing behind to answer, but a Windows restart is two
+        # processes for a moment, and a new one that reached a server still
+        # listening would take itself for the second copy, hand its command over
+        # and exit, leaving nothing running at all.
+        if self.server is not None:
+            self.server.close()
         QLocalServer.removeServer(SERVER_NAME)
         if sys.platform == "win32":
             # execv on Windows mangles arguments with spaces and leaves the two
@@ -1066,6 +1076,7 @@ def run_app(args):
     QLocalServer.removeServer(SERVER_NAME)
     if not server.listen(SERVER_NAME):
         print(f"dikte: could not open the IPC socket: {server.errorString()}")
+    dikte.server = server
 
     def on_connection():
         conn = server.nextPendingConnection()

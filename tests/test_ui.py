@@ -11,6 +11,8 @@ import unittest
 from typing import ClassVar
 from unittest import mock
 
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 import cleanup
@@ -116,6 +118,10 @@ class Settings(DikteTest):
                                             "_load_models"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_transcribe_models"))
+        # The local model boxes fetch their own list the moment they are shown,
+        # from a thread, which is nobody's test failing but a real request.
+        self.enterContext(mock.patch.object(settings_ui.LocalModelBox,
+                                            "_fetch_models"))
         self.enterContext(mock.patch.object(settings_ui.hotkey, "APPLICATIONS_DIR",
                                             self.path("applications")))
         self.enterContext(mock.patch.object(settings_ui.hotkey, "SHORTCUTS_FILE",
@@ -126,6 +132,14 @@ class Settings(DikteTest):
         self.addCleanup(window.deleteLater)
         self.addCleanup(window.close)
         return window
+
+    @staticmethod
+    def wheel():
+        """One notch of a mouse wheel, rolled downwards."""
+        return QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0),
+                           QPoint(0, -120), Qt.MouseButton.NoButton,
+                           Qt.KeyboardModifier.NoModifier,
+                           Qt.ScrollPhase.NoScrollPhase, False)
 
     def test_the_window_opens_with_every_tab_on_it(self):
         window = self.window(cfg.Config())
@@ -142,6 +156,41 @@ class Settings(DikteTest):
             window.tabs.setCurrentIndex(index)
             self.assertLess(window.minimumSizeHint().height(), 500,
                             window.tabs.tabText(index))
+
+    def test_the_window_cannot_be_dragged_down_to_a_stub(self):
+        # A tab that scrolls asks for no height of its own, which leaves nothing
+        # to stop the window being pulled down to a tab bar and half a button.
+        window = self.window(cfg.Config())
+        window.resize(1, 1)
+        self.assertGreaterEqual(window.width(), 500)
+        self.assertGreaterEqual(window.height(), 360)
+
+    def test_the_wheel_passes_over_a_box_it_was_not_aimed_at(self):
+        # Every tab scrolls now, and a combo box reads the wheel as a change of
+        # value: rolling down the page with the pointer over the language box
+        # would pick another language on the way past, and Save would write it
+        # down. The box takes the wheel once it has been clicked into.
+        window = self.window(cfg.Config())
+        # Shown and activated, because a box in a window nobody is looking at
+        # can be given the focus but never has it.
+        window.show()
+        window.activateWindow()
+        QApplication.processEvents()
+        box = window.ui_language
+        # Not the wheel focus a combo box has by default: Qt hands the focus
+        # over before it delivers the wheel, which would make "has the focus"
+        # true for the very roll being refused.
+        self.assertEqual(box.focusPolicy(), Qt.FocusPolicy.StrongFocus)
+        before = box.currentIndex()
+        rolled = self.wheel()
+        QApplication.sendEvent(box, rolled)
+        self.assertEqual(box.currentIndex(), before)
+        # Refused, not swallowed. An unaccepted wheel event is the one Qt
+        # carries on up to the scroll area, so the page moves instead.
+        self.assertFalse(rolled.isAccepted())
+        box.setFocus()
+        QApplication.sendEvent(box, self.wheel())
+        self.assertNotEqual(box.currentIndex(), before)
 
     def test_a_wrapped_label_keeps_the_room_its_lines_need(self):
         # The program path shares a row with a button, and a row is measured

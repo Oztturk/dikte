@@ -1,9 +1,9 @@
-# Dikte'yi bu Windows kullanicisi icin kurar: Baslat Menusu kisayolu, istege
-# bagli otomatik baslangic ve her yerden calisan bir `dikte` komutu.
+# Installs Dikte for this Windows user: a Start Menu entry, an optional
+# autostart entry, and a `dikte` command that works from any terminal.
 #
-#   powershell -ExecutionPolicy Bypass -File install.ps1              # kur
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -Autostart   # + oturum acilisinda baslat
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall   # kaldir
+#   powershell -ExecutionPolicy Bypass -File install.ps1              # install
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -Autostart   # + start at sign-in
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall   # remove
 param(
     [switch]$Autostart,
     [switch]$Uninstall
@@ -15,60 +15,65 @@ $startMenu = [Environment]::GetFolderPath("Programs")
 $startup = [Environment]::GetFolderPath("Startup")
 $shortcut = Join-Path $startMenu "Dikte.lnk"
 $autostartLink = Join-Path $startup "Dikte.lnk"
-# WindowsApps kullanici PATH'inde hazir durur; oraya birakilan dikte.cmd her
-# terminalden calisir.
+# WindowsApps is already on the user PATH, so a dikte.cmd left there runs from
+# any terminal without a PATH edit and without an administrator.
 $cmdShim = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\dikte.cmd"
 
 if ($Uninstall) {
     foreach ($path in @($shortcut, $autostartLink, $cmdShim)) {
-        if (Test-Path $path) { Remove-Item $path -Force; Write-Host "silindi: $path" }
+        if (Test-Path $path) { Remove-Item $path -Force; Write-Host "removed: $path" }
     }
-    Write-Host "Dikte kisayollari kaldirildi. Depo klasoru ve ayarlar duruyor."
+    Write-Host "Dikte's shortcuts are gone. The repository and your settings are not."
     exit 0
 }
 
-# --- gereksinimler ----------------------------------------------------------
+# --- what it needs ----------------------------------------------------------
 $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) {
-    Write-Error "Python bulunamadi. Kurun: winget install Python.Python.3.12"
+    Write-Error "No python found. Install it with: winget install Python.Python.3.12"
 }
 $version = & python -c "import sys; print('%d.%d' % sys.version_info[:2])"
 if ([version]$version -lt [version]"3.11") {
-    Write-Error "Python 3.11+ gerekli, bulunan: $version"
+    Write-Error "Python 3.11 or newer is needed, and this one is $version."
 }
 & python -c "import PyQt6.QtWidgets" 2>$null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "PyQt6 kuruluyor..."
+    Write-Host "Installing PyQt6..."
     & python -m pip install PyQt6
-    if ($LASTEXITCODE -ne 0) { Write-Error "PyQt6 kurulamadi." }
+    if ($LASTEXITCODE -ne 0) { Write-Error "PyQt6 would not install." }
 }
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-    Write-Warning "ffmpeg bulunamadi. Ses kaydi icin gerekli: winget install Gyan.FFmpeg"
+    Write-Warning "No ffmpeg found. Recording needs it: winget install Gyan.FFmpeg"
 }
 
-# pythonw.exe konsol penceresi acmadan calistirir.
+# pythonw.exe runs the same program without a console window behind it.
 $pythonw = Join-Path (Split-Path $python.Source) "pythonw.exe"
 if (-not (Test-Path $pythonw)) { $pythonw = $python.Source }
 
-# --- Baslat Menusu kisayolu -------------------------------------------------
+# --- the Start Menu entry ---------------------------------------------------
 $shell = New-Object -ComObject WScript.Shell
 foreach ($path in @($shortcut) + $(if ($Autostart) { @($autostartLink) } else { @() })) {
     $link = $shell.CreateShortcut($path)
     $link.TargetPath = $pythonw
     $link.Arguments = "`"$repo\dikte.py`" --gui"
     $link.WorkingDirectory = $repo
-    $link.Description = "Dikte: sesli dikte"
+    $link.Description = "Dikte: dictation"
     $link.Save()
-    Write-Host "kisayol: $path"
+    Write-Host "shortcut: $path"
 }
 
-# --- dikte komutu -----------------------------------------------------------
+# --- the dikte command ------------------------------------------------------
+# The interpreter by its full path rather than by name: the one checked above is
+# the one the command line should run, whatever a later PATH change puts first.
 $shimDir = Split-Path $cmdShim
 if (Test-Path $shimDir) {
-    "@echo off`r`npython `"$repo\dikte.py`" %*" | Out-File $cmdShim -Encoding ascii
-    Write-Host "komut: dikte  ($cmdShim)"
+    "@echo off`r`n`"$($python.Source)`" `"$repo\dikte.py`" %*" |
+        Out-File $cmdShim -Encoding ascii
+    Write-Host "command: dikte  ($cmdShim)"
+} else {
+    Write-Warning "No $shimDir on this machine, so there is no dikte command. Run it as: python `"$repo\dikte.py`""
 }
 
 Write-Host ""
-Write-Host "Kurulum tamam. Baslat Menusu'nden 'Dikte' ile ya da terminalden 'dikte' yazarak baslatin."
-Write-Host "Ilk acilista Ayarlar penceresi acilir: oradan model indirin ve kisayolu secin (varsayilan Ctrl+Space)."
+Write-Host "Installed. Start it from the Start Menu as 'Dikte', or type 'dikte' in a terminal."
+Write-Host "The Settings window opens on the first run: download a model there and pick the shortcut (Ctrl+Space by default)."

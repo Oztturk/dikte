@@ -484,6 +484,8 @@ class FakeWin32:
         self.next_handle = 1
         self.pressed = []          # (virtual key, flags), in the order sent
         self.send_result = None    # None: report every event as delivered
+        self.held = False          # another program has the clipboard open
+        self.out_of_memory = False
 
     def _keep(self, buffer):
         handle = self.next_handle
@@ -493,7 +495,7 @@ class FakeWin32:
 
     # --- user32
     def OpenClipboard(self, owner):
-        return 1
+        return 0 if self.held else 1
 
     def CloseClipboard(self):
         return 1
@@ -519,6 +521,8 @@ class FakeWin32:
 
     # --- kernel32
     def GlobalAlloc(self, flags, size):
+        if self.out_of_memory:
+            return 0
         return self._keep(ctypes.create_string_buffer(size))
 
     def GlobalLock(self, handle):
@@ -558,6 +562,23 @@ class Windows(Standing, DikteTest):
         paste.copy("the dictation")
         paste.copy_bytes(saved)
         self.assertEqual(self.api.text, "mine")
+
+    def test_a_copy_that_fails_leaves_what_was_there(self):
+        """EmptyClipboard is the point of no return, so nothing runs after it."""
+        paste.copy("mine")
+        for failure in ("out_of_memory", "held"):
+            with self.subTest(failure=failure):
+                setattr(self.api, failure, True)
+                with self.assertRaises(paste.PasteError):
+                    paste.copy("the dictation")
+                self.assertEqual(self.api.text, "mine")
+                setattr(self.api, failure, False)
+
+    def test_the_handle_is_not_leaked_when_the_copy_fails(self):
+        self.api.held = True
+        with self.assertRaises(paste.PasteError):
+            paste.copy("the dictation")
+        self.assertEqual(self.api.buffers, {})
 
     def test_readiness_asks_for_no_program_and_no_permission(self):
         with only_these_tools():

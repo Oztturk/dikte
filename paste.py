@@ -412,19 +412,26 @@ def _win_read_text():
 def _win_write_text(text):
     user32, kernel32 = _win_api()
     payload = str(text).encode("utf-16-le") + b"\x00\x00"
+    # Filled before the clipboard is opened at all. EmptyClipboard is what
+    # throws away whatever was there, and a failure after it and before the
+    # SetClipboardData would leave the clipboard holding nothing: the one way
+    # this function could lose what it was called to put back.
+    handle = kernel32.GlobalAlloc(_WIN_GMEM_MOVEABLE, len(payload))
+    pointer = kernel32.GlobalLock(handle) if handle else None
+    if not pointer:
+        if handle:
+            kernel32.GlobalFree(handle)
+        raise PasteError(t("Could not copy to clipboard: {error}",
+                           error="out of memory"))
+    ctypes.memmove(pointer, payload, len(payload))
+    kernel32.GlobalUnlock(handle)
+
     if not _win_open_clipboard(user32):
+        kernel32.GlobalFree(handle)
         raise PasteError(t("Could not copy to clipboard: {error}",
                            error="the clipboard is held by another program"))
-    handle = None
     try:
         user32.EmptyClipboard()
-        handle = kernel32.GlobalAlloc(_WIN_GMEM_MOVEABLE, len(payload))
-        pointer = kernel32.GlobalLock(handle) if handle else None
-        if not pointer:
-            raise PasteError(t("Could not copy to clipboard: {error}",
-                               error="out of memory"))
-        ctypes.memmove(pointer, payload, len(payload))
-        kernel32.GlobalUnlock(handle)
         if not user32.SetClipboardData(_WIN_CF_UNICODETEXT, handle):
             raise PasteError(t("Could not copy to clipboard: {error}",
                                error=f"error {_win_error()}"))

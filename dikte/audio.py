@@ -874,11 +874,13 @@ def _avfoundation_default_output():
 # this listing in. Newer builds mark each device `(audio)` or `(video)`; older
 # ones print no marker and group the devices under a heading instead. Both are
 # anchored at each end, so that the error lines the command ends with, which
-# quote the device name that was not found, are not read as devices.
+# quote the device name that was not found, are not read as devices. The
+# bracketed prefix is not pinned to a spelling: ffmpeg 8 writes `[in#0 @ ...]`
+# where the versions before it wrote `[dshow @ ...]`.
 _DSHOW_ENTRY = re.compile(
-    r'^(?:\[dshow @ [^\]]*\]\s*)?"([^"]+)"\s*(?:\(([^)]*)\))?\s*$')
+    r'^(?:\[[^\]]*\]\s*)?"([^"]+)"\s*(?:\(([^)]*)\))?\s*$')
 _DSHOW_ALTERNATIVE = re.compile(
-    r'^(?:\[dshow @ [^\]]*\]\s*)?Alternative name\s+"([^"]+)"\s*$')
+    r'^(?:\[[^\]]*\]\s*)?Alternative name\s+"([^"]+)"\s*$')
 _DSHOW_HEADING = re.compile(r'DirectShow (audio|video) devices')
 
 # The last listing taken, so that a dictation does not pay for one of its own.

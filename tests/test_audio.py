@@ -982,6 +982,22 @@ class WindowsDevices(OnWindows, DikteTest):
         with self.listing():
             self.assertNotIn("dummy", [name for _, name in audio.list_sources()])
 
+    def test_a_listing_from_ffmpeg_8_which_renamed_the_prefix(self):
+        """ffmpeg 8 writes `[in#0 @ ...]` where older builds wrote `[dshow @ ...]`."""
+        listing = (
+            '[in#0 @ 00000238c3300ac0] "Integrated Camera" (video)\n'
+            '[in#0 @ 00000238c3300ac0]   Alternative name "@device_pnp_\\..."\n'
+            '[in#0 @ 00000238c3300ac0] "OBS Virtual Camera" (none)\n'
+            '[in#0 @ 00000238c3300ac0]   Alternative name "@device_sw_{860B}"\n'
+            '[in#0 @ 00000238c3300ac0] "Mikrofon Dizisi (Intel® Smart Sound)" (audio)\n'
+            '[in#0 @ 00000238c3300ac0]   Alternative name "@device_cm_{33D9}"\n'
+            "Error opening input file dummy.\n"
+        ).encode("utf-8")
+        with self.listing(stderr=listing):
+            self.assertEqual(audio.list_sources(),
+                             [("@device_cm_{33D9}",
+                               "Mikrofon Dizisi (Intel® Smart Sound)")])
+
     def test_a_listing_from_an_ffmpeg_that_marks_nothing(self):
         """Older builds print a heading instead of an (audio) on every line."""
         listing = (

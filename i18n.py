@@ -56,12 +56,15 @@ TR = {
     "Start recording": "Kaydı başlat",
     "Stop and transcribe": "Kaydı bitir ve yaz",
     "Working…": "İşleniyor…",
+    "Pause the recording": "Kaydı duraklat",
+    "Resume the recording": "Kayda devam et",
     "Discard the recording": "Kaydı iptal et",
     "Settings…": "Ayarlar…",
     "Restart": "Yeniden başlat",
     "Quit": "Çık",
     "Dikte: ready": "Dikte: hazır",
     "Dikte: recording": "Dikte: kaydediyor",
+    "Dikte: paused": "Dikte: duraklatıldı",
     "Dikte: working": "Dikte: işleniyor",
 
     # --- overlay / pipeline -------------------------------------------
@@ -312,7 +315,14 @@ TR = {
         "Global kısayol kurulu değil. Tepsi menüsünden de soru sorulabilir.",
     "No global shortcut installed. The tray menu discards it too.":
         "Global kısayol kurulu değil. Kayıt tepsi menüsünden de iptal edilebilir.",
+    "No global shortcut installed. The tray menu holds it too.":
+        "Global kısayol kurulu değil. Kayıt tepsi menüsünden de duraklatılabilir.",
     "Start and stop": "Başlat ve bitir",
+    "Pause and resume": "Duraklat ve devam et",
+    "Holds the recording without ending it. Nothing said while it is paused is "
+    "kept, and the clock stops with it.":
+        "Kaydı bitirmeden duraklatır. Duraklatıldığı sürede konuşulanlar "
+        "kaydedilmez, süre sayacı da onunla birlikte durur.",
     "Throws the recording away without transcribing it. Works on a dictation "
     "and on a command for the agent alike, whichever is running.":
         "Kaydı yazıya dökmeden atar. Hangisi çalışıyorsa ona işler: dikteye de, "

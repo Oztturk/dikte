@@ -137,6 +137,13 @@ TR = {
     "Could not connect: {reason}": "Bağlantı kurulamadı: {reason}",
     "Could not parse the response: {error}": "Yanıt çözümlenemedi: {error}",
 
+    "whisper.cpp has no macOS build, and Homebrew's leaves out the server. "
+    "Build whisper-server yourself and give its path here, or transcribe in "
+    "the cloud. See the README.":
+        "whisper.cpp'nin macOS sürümü yok, Homebrew'unki de sunucuyu dışarıda "
+        "bırakıyor. whisper-server'ı kendin derleyip yolunu buraya yaz, ya da "
+        "buluta çevir. README'ye bak.",
+
     # --- settings: tabs and general ------------------------------------
     "Dikte Settings": "Dikte Ayarları",
     "General": "Genel",
@@ -564,6 +571,24 @@ TR = {
         "Hangi ses çıkışının kaydedileceği anlaşılamadı. Ayarlar → Toplantı "
         "sekmesinden seç.",
     "Nothing was recorded: {error}": "Hiçbir şey kaydedilmedi: {error}",
+    "The saved macOS audio device uses an old numeric index. Open Settings and "
+    "select the device again before recording.":
+        "Kayıtlı macOS ses aygıtı eski bir sayısal indeks kullanıyor. Kayıttan "
+        "önce Ayarlar'ı açıp aygıtı yeniden seç.",
+    "The saved macOS audio device is no longer connected: {device}. Open "
+    "Settings and select another device.":
+        "Kayıtlı macOS ses aygıtı artık bağlı değil: {device}. Ayarlar'ı açıp "
+        "başka bir aygıt seç.",
+    "More than one macOS audio device is named {device}. Disconnect the "
+    "duplicate or choose a different device.":
+        "Birden fazla macOS ses aygıtının adı {device}. Aynı adlı aygıtlardan "
+        "birini çıkar ya da başka bir aygıt seç.",
+    "The microphone handed over almost nothing ({percent}% of the recording was "
+    "empty), so your own side of the meeting will be mostly missing. Check the "
+    "device before the next one.":
+        "Mikrofon neredeyse hiçbir şey iletmedi (kaydın %{percent} kadarı boştu), "
+        "toplantının senin tarafın büyük ölçüde eksik olacak. Bir sonrakinden "
+        "önce aygıtı kontrol et.",
     "Transcribing {side}: {index}/{count}…":
         "{side} yazıya çevriliyor: {index}/{count}…",
     "you": "sen",

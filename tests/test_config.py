@@ -463,44 +463,6 @@ class Defaults(unittest.TestCase):
                          paste.desktop().shortcuts[0])
 
 
-class Directories(unittest.TestCase):
-    """Where the settings and the recordings are kept, per system."""
-
-    def test_linux_keeps_them_apart_and_follows_xdg(self):
-        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c",
-                                          "XDG_DATA_HOME": "/d"}):
-            config_dir, data_dir = cfg._directories("linux")
-        self.assertEqual(config_dir.as_posix(), "/c/dikte")
-        self.assertEqual(data_dir.as_posix(), "/d/dikte")
-
-    def test_linux_without_the_variables_set(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            config_dir, data_dir = cfg._directories("linux")
-        self.assertTrue(config_dir.as_posix().endswith("/.config/dikte"))
-        self.assertTrue(data_dir.as_posix().endswith("/.local/share/dikte"))
-
-    def test_a_mac_keeps_both_in_application_support(self):
-        config_dir, data_dir = cfg._directories("darwin")
-        self.assertEqual(config_dir, data_dir)
-        self.assertTrue(config_dir.as_posix()
-                        .endswith("/Library/Application Support/Dikte"))
-
-    def test_a_mac_does_not_read_the_xdg_variables(self):
-        """A Mac with them set from some other tool still stores in one place."""
-        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c"}):
-            config_dir, _ = cfg._directories("darwin")
-        self.assertNotIn("/c", config_dir.as_posix())
-
-    def test_windows_keeps_settings_and_data_apart(self):
-        # Forward slashes, because a backslash only separates on Windows and
-        # this test also runs on the Linux that checks the Windows half.
-        with mock.patch.dict(os.environ, {"APPDATA": "C:/roam",
-                                          "LOCALAPPDATA": "C:/local"}):
-            config_dir, data_dir = cfg._directories("win32")
-        self.assertEqual(config_dir.as_posix(), "C:/roam/Dikte")
-        self.assertEqual(data_dir.as_posix(), "C:/local/Dikte")
-
-
 if __name__ == "__main__":
     unittest.main()
 

@@ -671,6 +671,14 @@ class SettingsWindow(QDialog):
         self.local_threads = QSpinBox()
         self.local_threads.setRange(0, 64)
         self.local_threads.setSpecialValueText(t("Automatic"))
+        # A spin box asks for room for its numbers, and 64 is two characters:
+        # the word standing in for zero is what actually has to fit, and on
+        # macOS, where the stepper sits inside the frame, it does not. Widened
+        # to the word rather than to a number picked by eye, so that it still
+        # fits once the word is "Otomatik".
+        self.local_threads.setMinimumWidth(
+            self.local_threads.fontMetrics()
+            .horizontalAdvance(t("Automatic")) + 56)
         self.local_options = QWidget()
         options_form = QFormLayout(self.local_options)
         options_form.setContentsMargins(0, 0, 0, 0)
@@ -1618,7 +1626,8 @@ class SettingsWindow(QDialog):
         # turns them off.
         for which, (box, _status, _missing) in self._shortcut_rows.items():
             spec = hotkey.SHORTCUTS[which]
-            conf[spec.setting] = box.currentText().strip() or spec.fallback
+            conf[spec.setting] = (box.currentText().strip()
+                                  or hotkey.default_combo(which))
         conf["evdev_hotkey"] = self.evdev_enabled.isChecked()
         conf["history_limit"] = self.history_limit.value()
         conf.save()
@@ -1864,7 +1873,7 @@ class SettingsWindow(QDialog):
     def _install_shortcut(self, which):
         spec = hotkey.SHORTCUTS[which]
         box, _status, _missing = self._shortcut_rows[which]
-        combo = box.currentText().strip() or spec.fallback
+        combo = box.currentText().strip() or hotkey.default_combo(which)
         if not combo:
             QMessageBox.information(self, t("Shortcut"),
                                     t("Type a key combination first."))

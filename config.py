@@ -4,40 +4,21 @@ import collections
 import hashlib
 import json
 import os
-import pathlib
 import sys
 
 import api
 import ggml
 import i18n
 import paste
+import paths
 from i18n import t
 
 
-def _xdg(var, default):
-    return pathlib.Path(os.environ.get(var) or os.path.expanduser(default))
+_MACOS = sys.platform == "darwin"
 
-
-def _directories(platform=None):
-    """(settings, data), in the two places this system keeps them.
-
-    macOS keeps both in the one directory a Mac user's backup already knows
-    about. Everywhere else they are separate and follow the XDG variables.
-    """
-    if (platform or sys.platform) == "darwin":
-        support = pathlib.Path.home() / "Library/Application Support/Dikte"
-        return support, support
-    if (platform or sys.platform) == "win32":
-        roaming = pathlib.Path(
-            os.environ.get("APPDATA") or pathlib.Path.home() / "AppData/Roaming")
-        local = pathlib.Path(
-            os.environ.get("LOCALAPPDATA") or pathlib.Path.home() / "AppData/Local")
-        return roaming / "Dikte", local / "Dikte"
-    return (_xdg("XDG_CONFIG_HOME", "~/.config") / "dikte",
-            _xdg("XDG_DATA_HOME", "~/.local/share") / "dikte")
-
-
-CONFIG_DIR, DATA_DIR = _directories()
+# In paths.py rather than here, because ggml.py needs the same answer and
+# cannot ask this module: the import already runs the other way.
+CONFIG_DIR, DATA_DIR = paths.CONFIG_DIR, paths.DATA_DIR
 CONFIG_FILE = CONFIG_DIR / "config.json"
 HISTORY_FILE = DATA_DIR / "history.jsonl"
 RECORDINGS_DIR = DATA_DIR / "recordings"
@@ -444,11 +425,16 @@ DEFAULTS = {
     "speech_margin_db": 10.0,     # how far speech must rise above the noise floor
     "min_voiced_seconds": 0.3,
     "filter_hallucinations": True,
-    "shortcut": "Ctrl+Space",
+    # Ctrl+Space everywhere except a Mac, where macOS itself holds it for the
+    # input-source switch and Cmd+Space for Spotlight: neither is ours to take,
+    # so there Dikte starts on a combination a stock system leaves free.
+    "shortcut": "Ctrl+Option+Space" if _MACOS else "Ctrl+Space",
     # Ctrl+Alt+Space rather than Escape: the combination the recording started
     # with, one modifier along. Escape belongs to whatever window has focus, and
-    # while you are dictating something else usually has it.
-    "cancel_shortcut": "Ctrl+Alt+Space",
+    # while you are dictating something else usually has it. On a Mac that same
+    # trick lands on the toggle, Alt and Option being one key, so discarding
+    # gets a letter instead.
+    "cancel_shortcut": "Ctrl+Option+D" if _MACOS else "Ctrl+Alt+Space",
     "evdev_hotkey": False,
     "overlay_corner": "bottom-left",
     "keep_audio": False,

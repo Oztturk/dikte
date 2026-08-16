@@ -4,12 +4,12 @@ import os
 import shutil
 import threading
 
-from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QRect, Qt, QUrl, pyqtSignal
 from PyQt6.QtGui import QDesktopServices, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit,
+    QAbstractItemView, QAbstractSpinBox, QCheckBox, QComboBox, QDialog,
+    QDialogButtonBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit,
     QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -127,6 +127,58 @@ AUDIO_FILTER = ("*.mp3 *.wav *.m4a *.ogg *.opus *.flac *.aac *.wma "
                 "*.mp4 *.mkv *.webm *.mov *.avi")
 
 
+class WrappedLabel(QLabel):
+    """A label that wraps, and keeps the height the wrapping calls for.
+
+    Word wrap on its own only decides where the lines break. The height comes
+    from the layout, which asks once, before the width is settled, and a label
+    sharing a row with a button is answered as if one line were enough: a long
+    program path then has its second line cut off. Claiming the height back as
+    a minimum, once the width is known, is what keeps the whole text on screen.
+    """
+
+    def __init__(self, text="", parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+
+    def setText(self, text):
+        super().setText(text)
+        self._fit()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
+
+    def _fit(self):
+        # Measured off the font rather than asked of the label, whose own answer
+        # is floored by the minimum set here a moment ago and so only ever grows.
+        if self.width() > 0:
+            wrap = Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextWrapAnywhere
+            box = QRect(0, 0, self.width(), 0)
+            self.setMinimumHeight(
+                self.fontMetrics().boundingRect(box, wrap, self.text()).height())
+
+
+class WheelGuard(QObject):
+    """Keeps a rolled wheel off the box the pointer only passed over.
+
+    A combo box and a spin box both read the wheel as a change of value, and
+    every tab scrolls now: rolling down the API tab with the pointer over the
+    model box would pick a different model on the way past, and the setting is
+    saved without anybody having chosen it. The wheel counts once the box has
+    been clicked into; before that it is handed back to the page underneath,
+    which is what the roll was for.
+    """
+
+    def eventFilter(self, box, event):
+        if event.type() == QEvent.Type.Wheel and not box.hasFocus():
+            # Refused rather than swallowed. An unaccepted wheel event carries
+            # on up the parents to the scroll area, so the page still moves.
+            event.ignore()
+            return True
+        return super().eventFilter(box, event)
+
+
 class LocalModelBox(QGroupBox):
     """The program, the model, and the two downloads that put them there.
 
@@ -160,8 +212,7 @@ class LocalModelBox(QGroupBox):
 
         form = QFormLayout(self)
 
-        self.program_label = QLabel("")
-        self.program_label.setWordWrap(True)
+        self.program_label = WrappedLabel()
         self.install_button = QPushButton(t("Download"))
         self.install_button.clicked.connect(self._install_program)
         form.addRow(t("Program"), self._side_by_side(self.program_label,
@@ -484,18 +535,22 @@ class SettingsWindow(QDialog):
         self._shown_provider = ""
         self.transcriber = FileTranscriber(conf, self)
         self.setWindowTitle(t("Dikte Settings"))
-        self.resize(680, 640)
+
+        # One for the whole window, parented to it so it outlives the boxes it
+        # watches and goes when they do.
+        self._wheel_guard = WheelGuard(self)
 
         tabs = self.tabs = QTabWidget(self)
-        tabs.addTab(self._general_tab(), t("General"))
-        self.api_tab_index = tabs.addTab(self._api_tab(), t("API and models"))
-        tabs.addTab(self._prompt_tab(), t("Cleanup rules"))
-        tabs.addTab(self._assistant_tab(), t("Agent"))
-        tabs.addTab(self._meeting_tab(), t("Meeting"))
-        tabs.addTab(self._minutes_tab(), t("Minutes"))
-        tabs.addTab(self._file_tab(), t("Audio file"))
-        tabs.addTab(self._shortcut_tab(), t("Shortcuts"))
-        tabs.addTab(self._history_tab(), t("History"))
+        tabs.addTab(self._scrolled(self._general_tab()), t("General"))
+        self.api_tab_index = tabs.addTab(
+            self._scrolled(self._api_tab()), t("API and models"))
+        tabs.addTab(self._scrolled(self._prompt_tab()), t("Cleanup rules"))
+        tabs.addTab(self._scrolled(self._assistant_tab()), t("Agent"))
+        tabs.addTab(self._scrolled(self._meeting_tab()), t("Meeting"))
+        tabs.addTab(self._scrolled(self._minutes_tab()), t("Minutes"))
+        tabs.addTab(self._scrolled(self._file_tab()), t("Audio file"))
+        tabs.addTab(self._scrolled(self._shortcut_tab()), t("Shortcuts"))
+        tabs.addTab(self._scrolled(self._history_tab()), t("History"))
 
         # Save keeps the window open, so the window is closed with the titlebar
         # cross (or Escape) instead. A "Cancel" next to it would be a lie: the
@@ -507,6 +562,7 @@ class SettingsWindow(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(tabs)
         layout.addWidget(buttons)
+        self._size_to_screen(680, 640)
 
         self._models_loaded.connect(self._on_models_loaded)
         self._transcribe_models_loaded.connect(self._on_transcribe_models_loaded)
@@ -527,6 +583,40 @@ class SettingsWindow(QDialog):
         # because of that, so open it on the tab that fixes it.
         if not conf.transcribe_ready():
             self.tabs.setCurrentIndex(self.api_tab_index)
+
+    def _scrolled(self, page):
+        """A tab that scrolls instead of growing the window to fit."""
+        # Every tab goes through here. A page kept at its full height passes
+        # that height on as the window's minimum, and a tall one (the API tab
+        # is the tallest, and taller still under a large interface font) then
+        # pushes Save off the bottom of the screen with no way to shrink back.
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QScrollArea.Shape.NoFrame)
+        area.setWidget(page)
+        for box in page.findChildren((QComboBox, QAbstractSpinBox)):
+            # Focus by click or by tab, not by wheel. Qt hands the focus over
+            # before it delivers the wheel, so a box left on the default policy
+            # would have it by the time the guard below asked.
+            box.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            box.installEventFilter(self._wheel_guard)
+        return area
+
+    def _size_to_screen(self, width, height):
+        """Open at this size, or at whatever the screen has room for."""
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        if screen is not None:
+            room = screen.availableGeometry()
+            # Room for the titlebar and a little air, so the window is grabbable
+            # and the buttons along the bottom stay on screen.
+            width = min(width, room.width() - 40)
+            height = min(height, room.height() - 80)
+        # Scrolling tabs ask for no height of their own, which leaves nothing to
+        # stop the window being dragged down to a tab bar and half a button. The
+        # floor is a floor and not a demand: it never asks for more room than
+        # the screen has just been found to have.
+        self.setMinimumSize(min(520, width), min(380, height))
+        self.resize(width, height)
 
     # ---- tabs ----------------------------------------------------------
 
@@ -975,12 +1065,7 @@ class SettingsWindow(QDialog):
             lambda: self.assistant_prompt.setPlainText(cfg.default_assistant_prompt())
         )
         layout.addWidget(reset_prompt, 0, Qt.AlignmentFlag.AlignRight)
-
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        area.setFrameShape(QScrollArea.Shape.NoFrame)
-        area.setWidget(page)
-        return area
+        return page
 
     def _meeting_tab(self):
         page = QWidget()
@@ -1107,14 +1192,7 @@ class SettingsWindow(QDialog):
             lambda: self.meeting_prompt.setPlainText(cfg.default_meeting_prompt())
         )
         layout.addWidget(reset, 0, Qt.AlignmentFlag.AlignRight)
-
-        # Everything above is more than one screenful; let it scroll rather than
-        # squeezing the prompt box down to nothing.
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        area.setFrameShape(QScrollArea.Shape.NoFrame)
-        area.setWidget(page)
-        return area
+        return page
 
     def _minutes_tab(self):
         page = QWidget()

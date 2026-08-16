@@ -566,10 +566,12 @@ TR = {
     "duplicate or choose a different device.":
         "Birden fazla macOS ses aygıtının adı {device}. Aynı adlı aygıtlardan "
         "birini çıkar ya da başka bir aygıt seç.",
-    "The macOS microphone stopped delivering audio ({percent}% was empty). The "
-    "unusable recording was discarded; reconnect the device and try again.":
-        "macOS mikrofonu ses iletmeyi durdurdu (kaydın %{percent} kadarı boştu). "
-        "Kullanılamaz kayıt silindi; aygıtı yeniden bağlayıp tekrar dene.",
+    "The microphone handed over almost nothing ({percent}% of the recording was "
+    "empty), so your own side of the meeting will be mostly missing. Check the "
+    "device before the next one.":
+        "Mikrofon neredeyse hiçbir şey iletmedi (kaydın %{percent} kadarı boştu), "
+        "toplantının senin tarafın büyük ölçüde eksik olacak. Bir sonrakinden "
+        "önce aygıtı kontrol et.",
     "Transcribing {side}: {index}/{count}…":
         "{side} yazıya çevriliyor: {index}/{count}…",
     "you": "sen",

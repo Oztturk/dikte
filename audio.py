@@ -2,15 +2,16 @@
 
 Dictation records one source. A meeting records two of them at once, the
 microphone and what comes out of the speakers, and for that it goes through
-ffmpeg: one process reading both devices and merging them into the two channels
-of a single stream, which is the only way the two stay aligned with each other
-over an hour.
+ffmpeg. PulseAudio hands both devices to a single process, which merges them
+into the two channels of one stream and keeps them aligned itself. AVFoundation
+cannot be asked the same: two of its sessions inside one process starve each
+other, so a Mac captures each device on its own and the two mono streams are
+interleaved here as they arrive.
 
 Which programs do the capturing is a property of the machine, not of the code
 above: PulseAudio or PipeWire on Linux, AVFoundation through ffmpeg on macOS.
 They are gathered into one group each near the bottom of this file, and a
-chooser picks between them. macOS uses one ffmpeg process per AVFoundation
-device: two AVFoundation sessions in one process silently starve one another.
+chooser picks between them.
 """
 
 import array
@@ -18,6 +19,7 @@ import collections
 import json
 import math
 import os
+import queue
 import re
 import shutil
 import signal
@@ -38,6 +40,21 @@ CHUNK_FRAMES = 1024
 CHUNK_BYTES = CHUNK_FRAMES * SAMPLE_WIDTH * CHANNELS
 CHUNK_LATENCY_MS = round(CHUNK_FRAMES / RATE * 1000)
 MIN_FRAMES = int(RATE * 0.25)
+
+# A capture process hands over a block every CHUNK_LATENCY_MS. One that has said
+# nothing for this long has stopped rather than fallen behind, and the meeting
+# ends and says so instead of sitting on a read that will never return.
+STALL_SECONDS = 5.0
+# Room for a whole stall of the other stream, so the side still delivering is
+# never the one left waiting.
+QUEUE_BLOCKS = int(STALL_SECONDS * RATE / CHUNK_FRAMES) + 8
+
+# Exact zeroes are not quiet, they are nothing: a microphone that is really in
+# the room has a noise floor. This much of a recording that long means it handed
+# nothing over, which is worth saying once the meeting is over and nothing can
+# be done about it any more.
+QUIET_MIC_SECONDS = 10
+QUIET_MIC_SHARE = 0.5
 
 
 class Recorder(QObject):
@@ -193,17 +210,12 @@ def recording_command(target=""):
 def meeting_commands(mic_target, system_target):
     """The capture processes that produce one stereo meeting stream.
 
-    PulseAudio can keep both inputs in one ffmpeg process. AVFoundation cannot:
-    on a real Mac its two sessions silently starve the microphone, so each Mac
-    device is captured and clock-corrected by its own process. MeetingRecorder
-    interleaves those two mono streams after that.
+    One of them on PulseAudio, which merges both inputs itself; one per device
+    on a Mac, because two AVFoundation sessions in a process starve each other.
+    Which of the two it is stays in the table with everything else the sound
+    system decides, and MeetingRecorder reads the count rather than the machine.
     """
-    if sound() is COREAUDIO:
-        return [
-            _avfoundation_meeting_capture(mic_target),
-            _avfoundation_meeting_capture(system_target),
-        ]
-    return [sound().meeting(mic_target, system_target)]
+    return sound().meeting(mic_target, system_target)
 
 
 class AudioDeviceError(RuntimeError):
@@ -223,11 +235,11 @@ class MeetingRecorder(QObject):
     levels = pyqtSignal(float, float)      # mine, theirs
     stopped = pyqtSignal(str, float)       # wav path, duration (s)
     died = pyqtSignal()                    # ffmpeg quit on its own
+    warned = pyqtSignal(str)               # recorded, but something was wrong
     failed = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._proc = None
         self._procs = []
         self._thread = None
         self._wav = None
@@ -277,10 +289,10 @@ class MeetingRecorder(QObject):
                 self._procs.append(subprocess.Popen(
                     command, stdout=subprocess.PIPE, stderr=log, bufsize=0
                 ))
-            self._proc = self._procs[0]
         except (OSError, wave.Error) as exc:
+            # One of two capture processes may already be running, and a Mac
+            # left holding an open AVFoundation session records nothing else.
             self._terminate_processes()
-            self._proc = None
             self._procs = []
             self._close_file()
             self._drop_log()
@@ -326,13 +338,21 @@ class MeetingRecorder(QObject):
             pass
 
     def _pump_split(self):
-        left = self._procs[0].stdout
-        right = self._procs[1].stdout
+        # A reader thread per process. Taking turns on the two pipes from one
+        # thread would let a starved microphone hold up the far side too: its
+        # blocks would sit unread until the pipe filled and its ffmpeg stopped
+        # writing, and an hour of meeting would freeze with nothing said. Each
+        # stream is read as fast as it arrives, and a side that goes quiet for
+        # STALL_SECONDS ends the recording rather than hanging it.
         block = CHUNK_FRAMES * SAMPLE_WIDTH
+        streams = [queue.Queue(maxsize=QUEUE_BLOCKS) for _ in self._procs]
+        for proc, blocks in zip(self._procs, streams):
+            threading.Thread(target=_read_blocks, daemon=True,
+                             args=(proc.stdout, blocks, block)).start()
         try:
             while True:
-                mine = _read_exact(left, block)
-                theirs = _read_exact(right, block)
+                mine = _next_block(streams[0])
+                theirs = _next_block(streams[1])
                 if not mine or not theirs:
                     break
                 frames = min(len(mine), len(theirs)) // SAMPLE_WIDTH
@@ -407,7 +427,6 @@ class MeetingRecorder(QObject):
         self._thread = None
         codes = [proc.poll() for proc in self._procs]
         code = next((value for value in codes if value), 0)
-        self._proc = None
         self._procs = []
         self._close_file()
         return code
@@ -422,7 +441,7 @@ class MeetingRecorder(QObject):
             pass
 
     def stop(self):
-        if not self._proc:
+        if not self._procs:
             return
         # The count is read after the join: the pump thread is still appending
         # the last blocks up to the moment it ends.
@@ -446,21 +465,19 @@ class MeetingRecorder(QObject):
                 if tail or code else t("Recording too short, speak for at least 0.3 s")
             )
             return
-        if (self._split_inputs and frames >= RATE * 10
-                and self._mic_zero_frames / frames > 0.5):
-            empty = round(self._mic_zero_frames / frames * 100)
-            self._drop_log()
-            try:
-                os.unlink(self._path)
-            except OSError:
-                pass
-            self.failed.emit(t(
-                "The macOS microphone stopped delivering audio ({percent}% was "
-                "empty). The unusable recording was discarded; reconnect the "
-                "device and try again.", percent=empty,
-            ))
-            return
         self._drop_log()
+        # A microphone that handed nothing over costs the left channel, and the
+        # recording is kept anyway: the right one is everyone else, and an hour
+        # of them is worth more than an empty channel costs. Only the split
+        # capture can starve a device this way; one ffmpeg reading both cannot.
+        if (self._split_inputs and frames >= RATE * QUIET_MIC_SECONDS
+                and self._mic_zero_frames / frames > QUIET_MIC_SHARE):
+            self.warned.emit(t(
+                "The microphone handed over almost nothing ({percent}% of the "
+                "recording was empty), so your own side of the meeting will be "
+                "mostly missing. Check the device before the next one.",
+                percent=round(self._mic_zero_frames / frames * 100),
+            ))
         self.stopped.emit(self._path, frames / RATE)
 
     def _drop_log(self):
@@ -496,18 +513,38 @@ def stereo_levels(chunk):
 
 
 def interleave_mono(left, right):
-    """Two equally long mono-s16 buffers into one stereo-s16 buffer."""
-    left_samples = array.array("h")
-    right_samples = array.array("h")
-    left_samples.frombytes(left[:len(left) - len(left) % SAMPLE_WIDTH])
-    right_samples.frombytes(right[:len(right) - len(right) % SAMPLE_WIDTH])
+    """Two mono-s16 buffers into one stereo-s16 buffer, the shorter one setting
+    the length."""
+    left_samples, right_samples = _samples(left), _samples(right)
     frames = min(len(left_samples), len(right_samples))
-    stereo_samples = array.array("h")
-    stereo_samples.extend(
-        sample for pair in zip(left_samples[:frames], right_samples[:frames])
-        for sample in pair
-    )
+    stereo_samples = array.array("h", bytes(frames * 2 * SAMPLE_WIDTH))
+    stereo_samples[0::2] = left_samples[:frames]
+    stereo_samples[1::2] = right_samples[:frames]
     return stereo_samples.tobytes()
+
+
+def _read_blocks(stream, blocks, size):
+    """One stream's blocks onto its queue, ending with the empty one.
+
+    A queue that stays full is the pump having given up on this recording, and
+    then there is nobody left to hand anything to.
+    """
+    try:
+        while True:
+            block = _read_exact(stream, size)
+            blocks.put(block, timeout=STALL_SECONDS)
+            if not block:
+                return
+    except (OSError, ValueError, queue.Full):
+        pass
+
+
+def _next_block(blocks):
+    """The next block of a stream, empty once it ends or falls silent."""
+    try:
+        return blocks.get(timeout=STALL_SECONDS)
+    except queue.Empty:
+        return b""
 
 
 def _read_exact(stream, size):
@@ -522,9 +559,13 @@ def _read_exact(stream, size):
 
 
 def _zero_samples(chunk):
+    return _samples(chunk).count(0)
+
+
+def _samples(chunk):
     samples = array.array("h")
     samples.frombytes(chunk[:len(chunk) - len(chunk) % SAMPLE_WIDTH])
-    return sum(sample == 0 for sample in samples)
+    return samples
 
 
 def _peak(samples):
@@ -535,8 +576,9 @@ def _peak(samples):
 
 # --- the sound system, one group per machine -------------------------------
 
-# Both meeting commands merge the same way: each input down to mono at our own
-# rate, then the two of them into the left and right of one stream.
+# How the one PulseAudio process merges: each input down to mono at our own
+# rate, then the two of them into the left and right of one stream. A Mac does
+# the first half per process and the second half itself, in interleave_mono().
 MERGE_FILTER = (
     f"[0:a]aresample={RATE}:async=1,aformat=sample_fmts=s16:channel_layouts=mono[m];"
     f"[1:a]aresample={RATE}:async=1,aformat=sample_fmts=s16:channel_layouts=mono[s];"
@@ -600,13 +642,14 @@ def _pw_record_raw_option():
 
 
 def _pulse_meeting(mic_target, system_target):
-    return [
+    """One process for both devices: PulseAudio keeps them aligned itself."""
+    return [[
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
         "-f", "pulse", "-thread_queue_size", "4096", "-i", mic_target or "default",
         "-f", "pulse", "-thread_queue_size", "4096", "-i", system_target,
         "-filter_complex", MERGE_FILTER, "-map", "[out]",
         "-f", "s16le", "-ar", str(RATE), "-",
-    ]
+    ]]
 
 
 def _pactl_sources():
@@ -674,8 +717,20 @@ def _avfoundation_record(target):
     ]
 
 
-def _avfoundation_meeting_capture(target):
-    target = _resolve_avfoundation_target(target)
+def _avfoundation_meeting(mic_target, system_target):
+    """A process per device, both names read off the same device listing.
+
+    Asking ffmpeg what is plugged in costs a process of its own, and a listing
+    taken twice could renumber in between: the two targets have to be resolved
+    against the same one to name the same machine the user picked from.
+    """
+    inputs = _avfoundation_inputs()
+    return [_avfoundation_meeting_capture(mic_target, inputs),
+            _avfoundation_meeting_capture(system_target, inputs)]
+
+
+def _avfoundation_meeting_capture(target, inputs=None):
+    target = _resolve_avfoundation_target(target, inputs)
     return [
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
         "-thread_queue_size", "4096",
@@ -725,7 +780,7 @@ def _avfoundation_named_inputs():
             for _index, description in _avfoundation_inputs()]
 
 
-def _resolve_avfoundation_target(target):
+def _resolve_avfoundation_target(target, inputs=None):
     """Resolve a stored device name to its current, positional ffmpeg index."""
     if not target or target == "default":
         return "default"
@@ -734,7 +789,9 @@ def _resolve_avfoundation_target(target):
             "The saved macOS audio device uses an old numeric index. Open "
             "Settings and select the device again before recording."
         ))
-    matches = [index for index, description in _avfoundation_inputs()
+    if inputs is None:
+        inputs = _avfoundation_inputs()
+    matches = [index for index, description in inputs
                if description == target]
     if not matches:
         raise AudioDeviceError(t(
@@ -758,9 +815,10 @@ def _avfoundation_default_output():
 
 Sound = collections.namedtuple(
     "Sound",
-    # How to capture one source and two at once, the two device lists, which
-    # device a meeting records the far side from, and what to say when the
-    # programs for any of it are not installed.
+    # How to capture one source and how to capture two at once, that one as the
+    # list of processes it takes, the two device lists, which device a meeting
+    # records the far side from, and what to say when the programs for any of
+    # it are not installed.
     "record meeting inputs outputs default_output missing",
 )
 
@@ -775,7 +833,7 @@ PULSE = Sound(
 
 COREAUDIO = Sound(
     record=_avfoundation_record,
-    meeting=None,  # two separate capture processes; see meeting_commands()
+    meeting=_avfoundation_meeting,
     inputs=_avfoundation_named_inputs,
     # Every macOS capture device is offered as the far side of a meeting, the
     # loopback driver among them: there is no way to tell them apart, and an

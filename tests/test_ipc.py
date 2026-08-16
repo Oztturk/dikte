@@ -7,6 +7,7 @@ answers by saying nothing at all.
 
 import json
 import os
+import pathlib
 import sys
 import unittest
 from unittest import mock
@@ -57,7 +58,10 @@ class FakeSocket:
 
 class Paths(unittest.TestCase):
     def test_script_path_points_at_dikte(self):
-        self.assertTrue(ipc.script_path().endswith("dikte/__main__.py"))
+        # By its parts rather than as a string: the separator is a backslash on
+        # Windows, and the path is what a shortcut there runs too.
+        path = pathlib.Path(ipc.script_path())
+        self.assertEqual(path.parts[-2:], ("dikte", "__main__.py"))
         self.assertTrue(os.path.exists(ipc.script_path()))
 
     def test_the_shortcut_command_runs_it_with_this_interpreter(self):

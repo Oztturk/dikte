@@ -95,13 +95,19 @@ def restore_library_path():
     return moved
 
 
-# Where the distributions keep the trust store. One list rather than a guess
-# per distribution, in the order curl and Go try them.
+# Where the trust store is, which is not one place but is a short list of them:
+# every distribution takes its layout from one of four packages rather than
+# inventing one, and this is the list Go's crypto/x509 and curl both carry. The
+# first line alone answers Debian, Ubuntu, Arch, Gentoo, Fedora and Alpine,
+# which was checked rather than assumed; the rest are the ones that do it their
+# own way.
 CA_FILES = (
-    "/etc/ssl/certs/ca-certificates.crt",   # Debian, Ubuntu, Arch, Gentoo
-    "/etc/pki/tls/certs/ca-bundle.crt",     # Fedora, RHEL
-    "/etc/ssl/ca-bundle.pem",               # openSUSE
-    "/etc/ssl/cert.pem",                    # Alpine, and macOS
+    "/etc/ssl/certs/ca-certificates.crt",                 # Debian and everything after it
+    "/etc/pki/tls/certs/ca-bundle.crt",                   # Fedora, RHEL
+    "/etc/ssl/ca-bundle.pem",                             # openSUSE
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",  # RHEL 7 and CentOS
+    "/etc/pki/tls/cacert.pem",                            # OpenELEC
+    "/etc/ssl/cert.pem",                                  # Alpine, and macOS
 )
 CA_DIRECTORIES = ("/etc/ssl/certs", "/etc/pki/tls/certs")
 

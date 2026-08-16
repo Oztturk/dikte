@@ -69,6 +69,30 @@ class Paths(unittest.TestCase):
         self.assertTrue(command.startswith(sys.executable))
         self.assertTrue(command.endswith(" toggle"))
 
+    def test_a_packaged_build_names_itself_and_no_interpreter(self):
+        """There is no __main__.py on disk in one, and sys.executable is the
+        build's own binary rather than a Python anybody could run it with."""
+        with mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "executable", "/Applications/Dikte.app/Contents/MacOS/Dikte"), \
+             mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(ipc.launcher(),
+                             ["/Applications/Dikte.app/Contents/MacOS/Dikte"])
+
+    def test_an_appimage_names_the_file_rather_than_this_run_s_mount(self):
+        """A shortcut written to the mount works until the next login."""
+        with mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "executable", "/tmp/.mount_ab12/usr/bin/dikte"), \
+             mock.patch.dict(os.environ, {"APPIMAGE": "/home/me/Dikte.AppImage"}):
+            self.assertEqual(ipc.command_for("toggle"),
+                             "/home/me/Dikte.AppImage toggle")
+
+    def test_a_path_with_a_space_in_it_is_quoted(self):
+        """Which is every Mac, and an AppImage kept anywhere with a name."""
+        with mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.dict(os.environ, {"APPIMAGE": "/home/me/My Things/Dikte.AppImage"}):
+            self.assertEqual(ipc.command_for("cancel"),
+                             "'/home/me/My Things/Dikte.AppImage' cancel")
+
     @unittest.skipUnless(hasattr(os, "getuid"),
                          "the socket is named after a user id, which Windows "
                          "has no equivalent of")

@@ -74,6 +74,9 @@ jobs:
           bash -n scripts/install-mac.sh
           bash -n scripts/update.sh
           bash -n scripts/uninstall.sh
+          bash -n scripts/release.sh
+          bash -n packaging/build-appimage.sh
+          bash -n packaging/build-dmg.sh
 
   # The same job again for the same reason. The Windows backends are faked at
   # the one function that loads user32 and kernel32, so every line of them is

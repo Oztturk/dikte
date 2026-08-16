@@ -24,6 +24,16 @@ library, 3.11 or newer, and PyQt6.
 
 ## Install
 
+The [releases page](../../releases) has an AppImage and a disk image per Mac
+architecture. Both write their own menu entry, login item and `dikte` command
+the first time they run, and stand aside for an installation already on the
+machine; `dikte integrate --remove` takes them back. The AppImage still wants
+the system packages below, for the sound server, the clipboard and the
+keyboard. The disk image is signed with no Apple certificate, so the first
+launch is refused until you press **Open Anyway** under System Settings →
+Privacy & Security, and macOS asks for the microphone and Accessibility again
+after each update; installing from a checkout is what avoids that.
+
 ```sh
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
 systemctl --user enable --now ydotool     # needed for auto-paste
@@ -210,8 +220,9 @@ keys.
 
 Everything below is in the `dikte` package, which is what `python3 -m dikte`
 runs and what the `__main__.py` in it hands to every launcher and shortcut.
-`scripts/` holds install-mac.sh, update.sh and uninstall.sh; install.sh stays at
-the top, and `tests/` has a file per module.
+`scripts/` holds install-mac.sh, update.sh, uninstall.sh and release.sh;
+`packaging/` builds the AppImage and the disk image that release.sh's tag
+publishes; install.sh stays at the top, and `tests/` has a file per module.
 
 ```
 app.py            entry point, tray icon, state machine
@@ -232,6 +243,7 @@ settings_ui.py    settings window
 hotkey.py         the desktop's shortcut registry, the evdev listener, Carbon on a Mac
 paste.py          wl-clipboard and ydotool wrappers, pbcopy and CoreGraphics
 trayicon.py       the tray icons, drawn where there is no icon theme
+integrate.py      what a downloaded build writes into the desktop it landed on
 i18n.py           the string table
 ```
 

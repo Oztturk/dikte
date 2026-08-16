@@ -31,8 +31,10 @@ from . import config as cfg
 from . import filetranscribe
 from . import hotkey
 from . import ipc
+from . import integrate
 from . import meeting
 from . import paste
+from . import __version__
 
 NOT_RUNNING = 3
 
@@ -131,7 +133,7 @@ def _ask_instance(opts, cmd, wait=False, **args):
 
 def launch_gui(verb=""):
     """No instance running, so become the application itself."""
-    args = [sys.executable, ipc.script_path()]
+    args = ipc.launcher()
     if verb:
         args.append(verb)
     args.append("--gui")
@@ -145,7 +147,7 @@ def launch_gui(verb=""):
             close_fds=True,
         )
         sys.exit(0)
-    os.execv(sys.executable, args)
+    os.execv(args[0], args)
 
 
 def _not_running(opts):
@@ -770,6 +772,28 @@ def cmd_shortcut(opts):
                message)
 
 
+def cmd_integrate(opts):
+    """Write, or take away, the launchers a downloaded build installs itself.
+
+    Run for you on every start, so this is for the two cases that start does
+    not cover: undoing it, and repairing it from a terminal after the AppImage
+    was moved while Dikte was not running.
+    """
+    if not integrate.packaged():
+        return fail(opts, "this is a checkout, not a downloaded build; "
+                          "./install.sh writes those files here", 2)
+    try:
+        # force, because typing this is asking for it outright, where the same
+        # call on every start stands aside for an installation already there.
+        paths = integrate.remove() if opts.remove else integrate.install(force=True)
+    except OSError as exc:
+        return fail(opts, exc)
+    verb = "Removed" if opts.remove else "Wrote"
+    listing = "\n".join(f"  {path}" for path in paths)
+    return out(opts, {"ok": True, "paths": [str(path) for path in paths]},
+               f"{verb}:\n{listing}" if paths else "Nothing to change.")
+
+
 def cmd_status(opts):
     reply = ipc.send("status")
     if reply is None:
@@ -875,6 +899,8 @@ def build_parser():
                         help="print the answer as one JSON object")
     parser.add_argument("-q", "--quiet", action="store_true",
                         help="keep progress lines off stderr")
+    parser.add_argument("--version", action="version", version=f"dikte {__version__}",
+                        help="print the version and exit")
     parser.set_defaults(verb="", timeout=0, func=cmd_plain)
     subs = parser.add_subparsers(dest="verb", metavar="COMMAND")
 
@@ -1060,6 +1086,12 @@ def build_parser():
     remove.add_argument("which", nargs="?", default="toggle",
                         choices=tuple(hotkey.SHORTCUTS))
     remove.set_defaults(func=cmd_shortcut)
+
+    integrated = leaf(subs, "integrate",
+                      "menu entry, login item and command, for a downloaded build")
+    integrated.add_argument("--remove", action="store_true",
+                            help="take them away again")
+    integrated.set_defaults(func=cmd_integrate)
 
     # --- the application --------------------------------------------------
     leaf(subs, "status", "what it is doing right now").set_defaults(func=cmd_status)

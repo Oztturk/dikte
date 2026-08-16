@@ -10,6 +10,7 @@ shortcut may still send.
 
 import json
 import os
+import shlex
 import sys
 
 from PyQt6.QtNetwork import QLocalSocket
@@ -34,13 +35,29 @@ def script_path():
     )
 
 
+def launcher():
+    """The argv that starts Dikte again on this installation.
+
+    An interpreter and a file is only how a checkout starts. A packaged build
+    has no __main__.py on disk to name, and an AppImage is a squashfs mounted
+    under a fresh /tmp path every run, so what a shortcut written today has to
+    say is the .AppImage file the user keeps, not the binary inside this run's
+    mount. APPIMAGE is what the runtime puts that path in.
+    """
+    if not getattr(sys, "frozen", False):
+        return [sys.executable, script_path()]
+    return [os.environ.get("APPIMAGE") or sys.executable]
+
+
 def command_for(verb):
     """The command line a desktop's shortcut runs for one of the verbs.
 
     Also what Settings shows an i3 or XFCE user to paste into their own
     configuration, since there is no registry there for Dikte to write into.
+    Quoted, because a Mac keeps applications under a path with a space in it
+    and an AppImage lives wherever it was downloaded to.
     """
-    return f"{sys.executable} {script_path()} {verb}"
+    return shlex.join(launcher() + ([verb] if verb else []))
 
 
 def send(cmd, wait=False, timeout=0, **args):

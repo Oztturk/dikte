@@ -118,7 +118,7 @@ def _working(painter, size, ink):
     painter.drawPath(head)
 
 
-# The names Linux themes use, which are what dikte.py asks for either way.
+# The names Linux themes use, which are what app.py asks for either way.
 SHAPES = {
     "audio-input-microphone": _microphone,
     "media-record": _record,

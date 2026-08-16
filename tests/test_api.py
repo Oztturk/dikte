@@ -16,8 +16,8 @@ import threading
 import time
 import unittest
 
-import api
-import ggml
+from dikte import api
+from dikte import ggml
 from tests.support import (
     DikteTest,
     fake_urlopen,

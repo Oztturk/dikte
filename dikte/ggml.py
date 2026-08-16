@@ -44,9 +44,9 @@ import time
 import urllib.error
 import urllib.request
 
-import hub
-import paths
-from i18n import t
+from . import hub
+from . import paths
+from .i18n import t
 
 HOST = "127.0.0.1"
 # The path api.py asks for, so its URL and the server's line up.

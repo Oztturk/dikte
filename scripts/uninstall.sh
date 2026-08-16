@@ -4,7 +4,10 @@
 # is the word that deletes them.
 set -euo pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The checkout, one level up: this script lives in scripts/, everything it
+# touches is at the top of the tree.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENTRY="$DIR/dikte/__main__.py"
 USER_NAME="$(id -un)"
 BIN_DIR="$HOME/.local/bin"
 
@@ -49,7 +52,7 @@ count() {
 
 usage() {
   cat <<EOF
-Usage: ./uninstall.sh [--purge] [--yes]
+Usage: ./scripts/uninstall.sh [--purge] [--yes]
 
   --purge   also delete the settings ($CONFIG_DIR)
             and the dictations, meetings and recordings ($DATA_DIR)
@@ -93,9 +96,9 @@ if ((MACOS)); then
   say "Nothing to unregister: macOS shortcuts live only while Dikte runs."
 elif [[ -n "$PY" ]] && "$PY" -c 'import PyQt6.QtWidgets' 2>/dev/null; then
   for which in toggle pause cancel ask meeting; do
-    "$PY" "$DIR/dikte.py" shortcut remove "$which" >/dev/null 2>&1 || true
+    "$PY" "$ENTRY" shortcut remove "$which" >/dev/null 2>&1 || true
   done
-  case "$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import hotkey; print(hotkey.backend())' "$DIR" 2>/dev/null)" in
+  case "$(PYTHONPATH="$DIR" "$PY" -c 'from dikte import hotkey; print(hotkey.backend())' 2>/dev/null)" in
     kde)
       ok  "Global shortcuts unregistered"
       say "KWin reads that file at startup, so the keys are free after your next login."
@@ -111,10 +114,12 @@ fi
 # 2. The running instance --------------------------------------------------
 # It holds a tray icon and a socket; asking it to quit is tidier than pulling
 # its launchers out from under it.
-if pgrep -u "$USER_NAME" -f 'dikte\.py' >/dev/null 2>&1; then
-  [[ -n "$PY" ]] && "$PY" "$DIR/dikte.py" quit >/dev/null 2>&1 || true
+# The pattern matches an instance started before Dikte became a package as well,
+# which is what an uninstall run straight after an update finds running.
+if pgrep -u "$USER_NAME" -f 'dikte(/__main__|)\.py' >/dev/null 2>&1; then
+  [[ -n "$PY" ]] && "$PY" "$ENTRY" quit >/dev/null 2>&1 || true
   sleep 0.5
-  if pgrep -u "$USER_NAME" -f 'dikte\.py' >/dev/null 2>&1; then
+  if pgrep -u "$USER_NAME" -f 'dikte(/__main__|)\.py' >/dev/null 2>&1; then
     warn "Dikte is still running; close it from the tray icon"
   else
     ok "Stopped the running instance"
@@ -216,11 +221,11 @@ elif [[ "$CONFIG_DIR" == "$DATA_DIR" ]]; then
   # macOS keeps both in the one directory a Mac user's backup already knows
   # about, so naming it twice would only look like two things were kept.
   say "Settings and dictations kept:  $CONFIG_DIR"
-  say "Delete them too with:  ./uninstall.sh --purge"
+  say "Delete them too with:  ./scripts/uninstall.sh --purge"
 else
   say "Settings kept:     $CONFIG_DIR"
   say "Dictations kept:   $DATA_DIR"
-  say "Delete them too with:  ./uninstall.sh --purge"
+  say "Delete them too with:  ./scripts/uninstall.sh --purge"
 fi
 
 echo

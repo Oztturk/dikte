@@ -13,19 +13,19 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
-import api
-import assistant
-import audio
-import cleanup
-import config as cfg
-import filetranscribe
-import ggml
-import hotkey
-import ipc
-import meeting
-import paste
-from filetranscribe import FileTranscriber
-from i18n import t
+from . import api
+from . import assistant
+from . import audio
+from . import cleanup
+from . import config as cfg
+from . import filetranscribe
+from . import ggml
+from . import hotkey
+from . import ipc
+from . import meeting
+from . import paste
+from .filetranscribe import FileTranscriber
+from .i18n import t
 
 UI_LANGUAGES = [("Automatic (system)", "auto"), ("Turkish", "tr"), ("English", "en")]
 LANGUAGES = [

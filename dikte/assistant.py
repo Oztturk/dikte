@@ -29,9 +29,9 @@ import subprocess
 import threading
 import time
 
-import api
-import config as cfg
-from i18n import t
+from . import api
+from . import config as cfg
+from .i18n import t
 
 SESSION_FILE = cfg.DATA_DIR / "assistant.json"
 PROVIDERS = ("claude", "codex", "openrouter")

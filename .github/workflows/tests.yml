@@ -71,6 +71,6 @@ jobs:
       - name: Check the installer parses
         run: |
           bash -n install.sh
-          bash -n install-mac.sh
-          bash -n update.sh
-          bash -n uninstall.sh
+          bash -n scripts/install-mac.sh
+          bash -n scripts/update.sh
+          bash -n scripts/uninstall.sh

@@ -1,10 +1,11 @@
-#!/usr/bin/env python3
 """Dikte: press Ctrl+Space, talk, press again to transcribe, clean up and paste.
 
 This is the application: the tray icon, the state machine, and the socket the
 terminal talks to. Every verb it answers is in cli.py, which is also what runs
-`dikte.py --help`; the only argument handled here is --gui, which is how the
+`dikte --help`; the only argument handled here is --gui, which is how the
 command line says "there is no instance to talk to, so be one".
+
+Nothing runs this file directly; __main__.py is what the launchers start.
 """
 
 import contextlib
@@ -36,21 +37,21 @@ from PyQt6.QtGui import QAction, QIcon  # noqa: E402
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon  # noqa: E402
 
-import assistant  # noqa: E402
-import audio  # noqa: E402
-import cli  # noqa: E402
-import config as cfg  # noqa: E402
-import ggml  # noqa: E402
-import hotkey  # noqa: E402
-import i18n  # noqa: E402
-import ipc  # noqa: E402
-import meeting  # noqa: E402
-import trayicon  # noqa: E402
-from i18n import t  # noqa: E402
-from meeting import MeetingPipeline  # noqa: E402
-from overlay import Overlay  # noqa: E402
-from settings_ui import SettingsWindow  # noqa: E402
-from worker import Pipeline  # noqa: E402
+from . import assistant  # noqa: E402
+from . import audio  # noqa: E402
+from . import cli  # noqa: E402
+from . import config as cfg  # noqa: E402
+from . import ggml  # noqa: E402
+from . import hotkey  # noqa: E402
+from . import i18n  # noqa: E402
+from . import ipc  # noqa: E402
+from . import meeting  # noqa: E402
+from . import trayicon  # noqa: E402
+from .i18n import t  # noqa: E402
+from .meeting import MeetingPipeline  # noqa: E402
+from .overlay import Overlay  # noqa: E402
+from .settings_ui import SettingsWindow  # noqa: E402
+from .worker import Pipeline  # noqa: E402
 
 SERVER_NAME = ipc.SERVER_NAME
 IDLE, RECORDING, BUSY = "idle", "recording", "busy"
@@ -1168,7 +1169,3 @@ def run_app(args):
         QTimer.singleShot(0, dikte.toggle_meeting)
 
     return app.exec()
-
-
-if __name__ == "__main__":
-    sys.exit(main())

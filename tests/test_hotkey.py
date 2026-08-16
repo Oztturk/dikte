@@ -6,8 +6,8 @@ import subprocess
 import unittest
 from unittest import mock
 
-import config as cfg
-import hotkey
+from dikte import config as cfg
+from dikte import hotkey
 from tests.support import DikteTest, FakeCompleted, linux_only
 
 SHORTCUTS_RC = """[services][dikte-toggle.desktop]

@@ -16,12 +16,12 @@ from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-import cleanup
-import config as cfg
-import hotkey
-import overlay as overlay_module
-import paste
-import settings_ui
+from dikte import cleanup
+from dikte import config as cfg
+from dikte import hotkey
+from dikte import overlay as overlay_module
+from dikte import paste
+from dikte import settings_ui
 from tests.support import DikteTest, only_these_tools
 
 # One application for the whole run; Qt allows no second one.
@@ -281,7 +281,7 @@ class Settings(DikteTest):
         text = self.shortcut_tab_text(window)
         self.assertIn("i3 keeps no shortcut registry", text)
         self.assertNotIn("KWin", text)
-        self.assertIn("dikte.py toggle", text)
+        self.assertIn("__main__.py toggle", text)
         # Not a choice to offer where it is the only mechanism there is.
         self.assertTrue(window.evdev_enabled.isHidden())
         self.assertFalse([button for button in
@@ -458,7 +458,7 @@ class MacSettings(Settings):
         text = self.shortcut_tab_text(window)
         self.assertIn("Dikte asks macOS for these combinations", text)
         self.assertNotIn("KWin", text)
-        self.assertNotIn("dikte.py toggle", text)
+        self.assertNotIn("__main__.py toggle", text)
 
     def test_the_paste_keys_on_offer_are_the_ones_a_mac_uses(self):
         window = self.window(cfg.Config())
@@ -482,7 +482,7 @@ class KdeSettings(Settings):
         self.assertIn("KWin only reads shortcut settings at startup", text)
         self.assertIn("Install as a KDE shortcut", text)
         self.assertNotIn("keeps no shortcut registry", text)
-        self.assertNotIn("dikte.py toggle", text)
+        self.assertNotIn("__main__.py toggle", text)
         # Here it is a choice: the wait for the next login, or the key press
         # reaching the focused application as well.
         self.assertFalse(window.evdev_enabled.isHidden())

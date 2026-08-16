@@ -11,19 +11,38 @@
 # Homebrew moves that copy.
 set -euo pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The checkout, one level up: this script lives in scripts/, everything it
+# touches is at the top of the tree.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The one file that starts the application, whoever is asking: the wrapper in
+# ~/.local/bin, the bundle, and every shortcut Dikte registers.
+ENTRY="$DIR/dikte/__main__.py"
 APP_DIR="$HOME/Applications"
 APP="$APP_DIR/Dikte.app"
 BIN_DIR="$HOME/.local/bin"
 AGENT_DIR="$HOME/Library/LaunchAgents"
 AGENT_ID="io.github.yusufipk.dikte"
 AGENT="$AGENT_DIR/$AGENT_ID.plist"
-SHORTCUT="${1:-Ctrl+Option+Space}"
-# Without the colon, so that a second argument given as "" stays empty. That is
-# how update.sh says "this one was turned off", as against not saying anything.
-CANCEL_SHORTCUT="${2-Ctrl+Option+D}"
+# Only the one: the discard key's default is the settings' own, read back below.
+DEFAULT_SHORTCUT="Ctrl+Option+Space"
+# Given as arguments, or asked of the settings further down. An installer run
+# again, which is what every update does, must not undo a key you chose in
+# Settings, so silence here means "keep whatever is there".
+SHORTCUT="${1:-}"
+CANCEL_SHORTCUT="${2-}"
+# Passed as "" means the discard key is off, which is not the same answer as
+# not being passed at all.
+CANCEL_GIVEN=$(( $# >= 2 ))
+# One caller says both without meaning either: an updater from before Dikte
+# became a package looks for the settings at a path that no longer exists, and
+# so passes the default key and an empty discard key rather than yours. This
+# can go once nobody is updating across that commit any more.
+if [[ "$SHORTCUT" == "$DEFAULT_SHORTCUT" && $CANCEL_GIVEN == 1 && -z "$CANCEL_SHORTCUT" ]]; then
+  SHORTCUT=""
+  CANCEL_GIVEN=0
+fi
 
-# The two places Homebrew installs to, in front, for the same reason dikte.py
+# The two places Homebrew installs to, in front, for the same reason the app
 # puts them there: a shell that has not been logged into since Homebrew was
 # installed does not have them, and this script would then report ffmpeg as
 # missing while the application finds it perfectly well.
@@ -147,7 +166,7 @@ if [ ! -d "\$PYTHONHOME" ]; then
   osascript -e 'display alert "Dikte" message "The Python this was installed against is gone, most likely after a brew upgrade. Run ./install.sh again."' >/dev/null 2>&1
   exit 1
 fi
-exec "\$HERE/python3" "$DIR/dikte.py" --gui "\$@"
+exec "\$HERE/python3" "$ENTRY" --gui "\$@"
 EOF
 chmod +x "$APP/Contents/MacOS/Dikte"
 
@@ -186,7 +205,7 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 # and no second place to change what Dikte looks like. Failing to draw it is
 # not worth stopping for: a bundle with no icon gets the generic one.
 iconset="$(mktemp -d)/Dikte.iconset"
-if "$PY" "$DIR/trayicon.py" "$iconset" >/dev/null 2>&1 \
+if PYTHONPATH="$DIR" "$PY" -m dikte.trayicon "$iconset" >/dev/null 2>&1 \
    && iconutil -c icns "$iconset" -o "$APP/Contents/Resources/Dikte.icns" 2>/dev/null; then
   ok "Icon drawn"
 else
@@ -212,7 +231,7 @@ fi
   -f "$APP" >/dev/null 2>&1 || true
 
 # 4. The command ------------------------------------------------------------
-# A wrapper, where Linux gets a symlink to dikte.py. The shebang there is
+# A wrapper, where Linux gets a symlink to the entry point. The shebang there is
 # `env python3`, and on a Mac that is Apple's 3.9: the symlink would resolve to
 # the one interpreter that cannot run this. Naming the interpreter here also
 # gives update.sh and uninstall.sh somewhere to read it from, so that the three
@@ -221,9 +240,9 @@ mkdir -p "$BIN_DIR"
 cat > "$BIN_DIR/dikte" <<EOF
 #!/bin/sh
 # Written by install-mac.sh. Edit that, not this.
-exec "$PY" "$DIR/dikte.py" "\$@"
+exec "$PY" "$ENTRY" "\$@"
 EOF
-chmod +x "$BIN_DIR/dikte" "$DIR/dikte.py"
+chmod +x "$BIN_DIR/dikte" "$ENTRY"
 ok "Command installed: $BIN_DIR/dikte"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -271,14 +290,27 @@ fi
 # shortcut registry at all, so "installed" means the running application is
 # holding the combination, and the settings file is where it reads it from
 # after a restart. Nothing here needs a logout, unlike KDE.
-if [[ "$SHORTCUT" == "$CANCEL_SHORTCUT" ]]; then
-  warn "Both arguments are $SHORTCUT, so the discard key was left out."
+#
+# What was not asked for is read back out of the settings, which is what makes
+# a second run of this script leave the keys you chose alone.
+stored() { PYTHONPATH="$DIR" "$PY" -m dikte config get "$1" 2>/dev/null || true; }
+if [[ -z "$SHORTCUT" ]]; then
+  SHORTCUT="$(stored shortcut)"
+  SHORTCUT="${SHORTCUT:-$DEFAULT_SHORTCUT}"
+fi
+if [[ $CANCEL_GIVEN == 0 ]]; then
+  # An empty answer here is a discard key that was turned off, and it stays off.
+  CANCEL_SHORTCUT="$(stored cancel_shortcut)"
+fi
+
+if [[ -n "$CANCEL_SHORTCUT" && "$SHORTCUT" == "$CANCEL_SHORTCUT" ]]; then
+  warn "Both keys are $SHORTCUT, so the discard key was left out."
   say  "Pass two different combinations, or set it in Settings → Shortcuts."
   CANCEL_SHORTCUT=""
 fi
 
 register() {   # which  combination  label
-  if out="$("$PY" "$DIR/dikte.py" shortcut install "$1" --combo "$2" 2>&1)"; then
+  if out="$("$PY" "$ENTRY" shortcut install "$1" --combo "$2" 2>&1)"; then
     ok "$3: $2"
   else
     warn "${out%%$'\n'*}"

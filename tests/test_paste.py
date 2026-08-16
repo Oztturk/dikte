@@ -22,7 +22,7 @@ import unittest
 from typing import ClassVar
 from unittest import mock
 
-import paste
+from dikte import paste
 from tests.support import DikteTest, FakeCompleted, only_these_tools
 
 

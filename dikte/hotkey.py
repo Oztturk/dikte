@@ -30,7 +30,7 @@ import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from i18n import t
+from .i18n import t
 
 DESKTOP_ID = "dikte-toggle.desktop"
 CANCEL_DESKTOP_ID = "dikte-cancel.desktop"

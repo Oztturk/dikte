@@ -22,9 +22,9 @@ import urllib.request
 import wave
 from unittest import mock
 
-import assistant
-import config as cfg
-import i18n
+from dikte import assistant
+from dikte import config as cfg
+from dikte import i18n
 
 # What the application is, rather than what it does: PipeWire, wl-clipboard,
 # ydotool, KDE's shortcut file, /dev/input. A port to another desktop replaces

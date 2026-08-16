@@ -22,16 +22,16 @@ import time
 
 from PyQt6.QtCore import QCoreApplication, QTimer
 
-import api
-import assistant
-import audio
-import cleanup
-import config as cfg
-import filetranscribe
-import hotkey
-import ipc
-import meeting
-import paste
+from . import api
+from . import assistant
+from . import audio
+from . import cleanup
+from . import config as cfg
+from . import filetranscribe
+from . import hotkey
+from . import ipc
+from . import meeting
+from . import paste
 
 NOT_RUNNING = 3
 

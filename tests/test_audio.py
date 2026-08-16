@@ -21,7 +21,7 @@ import unittest
 import wave
 from unittest import mock
 
-import audio
+from dikte import audio
 from tests.support import (
     DikteTest,
     FakeCompleted,

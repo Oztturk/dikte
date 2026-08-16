@@ -6,12 +6,12 @@ import json
 import os
 import sys
 
-import api
-import ggml
-import i18n
-import paste
-import paths
-from i18n import t
+from . import api
+from . import ggml
+from . import i18n
+from . import paste
+from . import paths
+from .i18n import t
 
 
 _MACOS = sys.platform == "darwin"

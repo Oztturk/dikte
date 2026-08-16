@@ -4,9 +4,9 @@
 çevrilir, bir model transkripti temizler (ıı'lar, tekrarlar, eksik noktalama),
 sonuç panoya kopyalanır ve o an yazdığın pencereye yapıştırılır.
 
-KDE Plasma 6 / Wayland için yazıldı, GNOME X11 ve macOS'ta da çalışır. Sistem
-paketleri dışında bağımlılığı yok: sadece Python standart kütüphanesi (3.11 veya
-üstü) ve PyQt6.
+KDE Plasma 6 / Wayland için yazıldı, GNOME X11, macOS ve
+[Windows](README.windows.md)'ta da çalışır. Sistem paketleri dışında bağımlılığı
+yok: sadece Python standart kütüphanesi (3.11 veya üstü) ve PyQt6.
 
 *[English README](README.md)*
 
@@ -80,6 +80,12 @@ yani `whisper-cli` kuruluyor, Dikte'nin konuştuğu sunucu değil. Kendin derle
 build -j`) ve yolunu Ayarlar → API'ye yaz, ya da buluta çevir. Toplantı için
 BlackHole veya Loopback gerekiyor (`brew install blackhole-2ch`); dikte için
 gerekmiyor.
+
+Windows da aynı şekilde çalışıyor, Dikte açıkken kombinasyonu sistemin kendi
+kısayol servisi üzerinden tutuyor: `winget install Gyan.FFmpeg`, `pip install
+PyQt6`, sonra `python dikte.py`; Başlat Menüsü girdisi ve `dikte` komutu için
+isteğe bağlı `install.ps1`. Orada toplantı kaydı henüz yok, ayrıntılar
+[Windows README](README.windows.md)'sinde.
 
 `install.sh` `dikte` komutunu, menü girdisini, oturum açılışında otomatik
 başlatmayı ve iki global kısayolu kurar; tuşları da iki argümanı. `./update.sh`

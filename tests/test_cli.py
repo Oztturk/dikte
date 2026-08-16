@@ -12,12 +12,14 @@ import json
 import unittest
 from unittest import mock
 
+import audio
 import cli
 import config as cfg
 import ggml
 import hotkey
 import ipc
-from tests.support import DikteTest, fake_urlopen
+import paste
+from tests.support import DikteTest, fake_urlopen, only_these_tools
 
 
 class Options:
@@ -435,6 +437,30 @@ class Doctor(DikteTest):
         self.assertIn("OpenRouter key, cleaning up on some/model",
                       self.run_doctor(as_json=False, cleanup_model="some/model"))
 
+    def test_it_asks_after_the_programs_this_desktop_actually_uses(self):
+        """A missing ydotool on a Mac is a red mark with nothing behind it."""
+        with mock.patch.object(cli.paste, "desktop", return_value=paste.MACOS):
+            mac = self.run_doctor()["programs"]
+        with mock.patch.object(cli.paste, "desktop", return_value=paste.WAYLAND):
+            wayland = self.run_doctor()["programs"]
+        self.assertIn("pbcopy", mac)
+        self.assertNotIn("ydotool", mac)
+        self.assertIn("ydotool", wayland)
+        self.assertIn("ffmpeg", mac)   # the one every system records through
+
+    def test_a_system_that_shells_out_for_neither_half_is_asked_for_neither(self):
+        # shutil.which is faked as well as the platform: the real one reads
+        # sys.platform too, and reaches for a Windows API this machine has not
+        # got the moment it is told it is on Windows.
+        with mock.patch.object(cli.paste, "desktop", return_value=paste.WINDOWS), \
+                only_these_tools("ffmpeg"), \
+                mock.patch.object(cli.sys, "platform", "win32"):
+            programs = self.run_doctor()["programs"]
+        self.assertNotIn("", programs)
+        self.assertEqual([name for name in ("wl-copy", "ydotool", "pactl",
+                                            "pw-record", "kwriteconfig6")
+                          if name in programs], [])
+
     def test_cleanup_on_a_cli_is_a_question_about_the_program(self):
         reply = self.run_doctor(cleanup_provider="codex",
                                 cleanup_codex_model="gpt-5.4")
@@ -444,6 +470,25 @@ class Doctor(DikteTest):
         self.assertIn("codex, cleaning up on gpt-5.4",
                       self.run_doctor(as_json=False, cleanup_provider="codex",
                                       cleanup_codex_model="gpt-5.4"))
+
+
+class Devices(DikteTest):
+    def test_a_machine_with_nothing_names_its_own_missing_program(self):
+        """The Windows README sends people here, and pactl is not on it."""
+        for here, expected in ((audio.DSHOW, "ffmpeg"),
+                               (audio.PULSE, "pulseaudio-utils")):
+            with self.subTest(sound=expected):
+                with mock.patch.object(cli.audio, "sound", return_value=here), \
+                        mock.patch.object(cli.audio, "list_sources",
+                                          return_value=[]), \
+                        mock.patch.object(cli.audio, "list_monitors",
+                                          return_value=[]), \
+                        mock.patch.object(cli.audio, "default_monitor",
+                                          return_value=""), \
+                        captured() as (out, _err):
+                    code = cli.cmd_devices(Options(json=True))
+                self.assertEqual(code, 1)
+                self.assertIn(expected, json.loads(out.getvalue())["error"])
 
 
 class Finding(DikteTest):

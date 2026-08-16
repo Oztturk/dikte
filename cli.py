@@ -655,7 +655,10 @@ def cmd_devices(opts):
                  "default": name == default}
                 for name, desc in audio.list_monitors()]
     if not mics and not monitors:
-        return fail(opts, "pactl found nothing; is PipeWire running?")
+        # Which program was asked, and so which one to go and look at, is not
+        # the same on all four systems: naming pactl on Windows sends somebody
+        # after a program that was never going to be there.
+        return fail(opts, audio.sound().missing)
 
     lines = ["Microphones:"]
     lines += [f"  {'*' if item['chosen'] else ' '} {item['name']}\n"
@@ -791,9 +794,20 @@ def cmd_status(opts):
 def cmd_doctor(opts):
     """What the settings window checks behind its buttons, in one pass."""
     conf = cfg.Config()
-    wanted = ["pw-record", "wl-copy", "ydotool", "ffmpeg", "pactl", "kwriteconfig6",
-              assistant.executable(assistant.provider(conf)) or "claude",
-              cleanup.executable(cleanup.provider(conf))]
+    # The two the clipboard and the key press go through come out of the table
+    # rather than being spelled here, because they are not the same pair on all
+    # four systems: X11 pastes with xclip where Wayland pastes with wl-copy, a
+    # Mac shells out for one half and Windows for neither. A row saying ydotool
+    # is missing on a machine that would never have run it is not a diagnosis,
+    # it is a red mark to explain away.
+    here = paste.desktop()
+    wanted = [here.clipboard, here.keyboard]
+    if sys.platform.startswith("linux"):
+        # Recording, the device list, and KDE's shortcut registry.
+        wanted += ["pw-record", "pactl", "kwriteconfig6"]
+    wanted += ["ffmpeg",
+               assistant.executable(assistant.provider(conf)) or "claude",
+               cleanup.executable(cleanup.provider(conf))]
     programs = {name: shutil.which(name) or "" for name in wanted if name}
     target = conf.transcribe_target()
     cleaner = cleanup.provider(conf)

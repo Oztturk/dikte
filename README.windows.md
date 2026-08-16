@@ -62,8 +62,9 @@ python dikte.py
 
 ## Troubleshooting
 
-- **Recording does not start:** does `ffmpeg -version` run? Does
-  `dikte devices` list your microphone?
+- **Recording does not start:** does `dikte doctor` find ffmpeg, and does
+  `dikte devices` list your microphone? `devices` also takes a fresh listing,
+  which is what to run after plugging one in.
 - **Nothing is pasted:** a normal-privilege process cannot type into an
   elevated (administrator) window; run Dikte elevated too, or paste by hand.
   The text lands on the clipboard either way.

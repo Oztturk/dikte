@@ -12,6 +12,9 @@ up and pasted where your cursor is.
 
 ## Installing
 
+From a checkout: the releases page carries an AppImage and a disk image, and no
+Windows build yet.
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```

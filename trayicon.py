@@ -1,11 +1,11 @@
-"""The three tray icons, drawn here for systems that have no icon theme.
+"""The four tray icons, drawn here for systems that have no icon theme.
 
-Linux hands out `audio-input-microphone`, `media-record` and `view-refresh`
-from whatever icon theme is installed, and Qt finds them through
-QIcon.fromTheme. macOS has no such registry: fromTheme returns a null icon
-there, and a null icon in the menu bar is an item you cannot see, which is the
-whole of Dikte's interface gone. So the same three shapes are drawn here, and
-used whenever the theme has nothing to offer.
+Linux hands out `audio-input-microphone`, `media-record`, `view-refresh` and
+`media-playback-pause` from whatever icon theme is installed, and Qt finds them
+through QIcon.fromTheme. macOS has no such registry: fromTheme returns a null
+icon there, and a null icon in the menu bar is an item you cannot see, which is
+the whole of Dikte's interface gone. So the same four shapes are drawn here,
+and used whenever the theme has nothing to offer.
 
 They are drawn as template images: one colour, transparent everywhere else,
 with isMask set. That is what lets macOS invert them for a dark menu bar and
@@ -75,6 +75,18 @@ def _record(painter, size):
     painter.drawEllipse(QPointF(11 * unit, 11 * unit), 6.4 * unit, 6.4 * unit)
 
 
+def _paused(painter, size):
+    """Two bars: the recording is still ours, and nothing is going into it."""
+    unit = size / 22.0
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(INK)
+    for left in (6.4, 12.4):
+        painter.drawRoundedRect(
+            QRectF(left * unit, 5.0 * unit, 3.2 * unit, 12.0 * unit),
+            1.2 * unit, 1.2 * unit,
+        )
+
+
 def _working(painter, size):
     """An arrow chasing its own circle: transcribing, cleaning up, thinking."""
     unit = size / 22.0
@@ -102,6 +114,7 @@ def _working(painter, size):
 SHAPES = {
     "audio-input-microphone": _microphone,
     "media-record": _record,
+    "media-playback-pause": _paused,
     "view-refresh": _working,
 }
 

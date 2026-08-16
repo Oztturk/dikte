@@ -96,6 +96,7 @@ CHANGED = {
     "file_cleanup": False,
     "shortcut": "Ctrl+Alt+Space",
     "cancel_shortcut": "Meta+Shift+Space",
+    "pause_shortcut": "Meta+P",
     "evdev_hotkey": True,
     "history_limit": 50,
 }
@@ -269,6 +270,7 @@ class Settings(DikteTest):
         self.assertTrue(conf["shortcut"])
         self.assertEqual(conf["shortcut"], hotkey.default_combo("toggle"))
         self.assertEqual(conf["cancel_shortcut"], "")
+        self.assertEqual(conf["pause_shortcut"], "")
         self.assertEqual(conf["assistant_shortcut"], "")
         self.assertEqual(conf["meeting_shortcut"], "")
 
@@ -465,6 +467,27 @@ class Overlay(DikteTest):
         widget.show_done("Pasted")
         widget._conceal()
         self.assertFalse(widget.showing)
+
+    def test_a_held_recording_says_so_and_stops_moving(self):
+        """Everything about the ribbon says a recording is running; a pause the
+        ribbon did not show would leave all of it saying the opposite."""
+        widget = self.overlay()
+        widget.show_recording()
+        widget.push_level(0.8)
+        widget.set_paused(True)
+        levels = list(widget.levels)
+        widget._tick()
+        self.assertEqual(widget.levels, levels)
+        widget.set_paused(False)
+        widget._tick()
+        self.assertNotEqual(widget.levels, levels)
+
+    def test_a_new_recording_is_never_the_last_one_still_held(self):
+        widget = self.overlay()
+        widget.show_recording()
+        widget.set_paused(True)
+        widget.show_recording()
+        self.assertFalse(widget.paused)
 
     def test_a_meeting_shows_both_sides(self):
         widget = self.overlay()

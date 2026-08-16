@@ -43,7 +43,7 @@ GUI_VERBS = {"", "settings", "toggle", "ask", "meeting"}
 # Asking a process that is not there to stop, cancel or quit is not a failure;
 # it is already in the state that was asked for.
 IDEMPOTENT_VERBS = {"cancel", "stop", "quit", "restart", "ask-cancel",
-                    "ask-reset", "meeting-cancel"}
+                    "ask-reset", "meeting-cancel", "pause"}
 
 _app = None
 
@@ -765,7 +765,8 @@ def cmd_status(opts):
         return fail(opts, "the running instance is from before it could answer "
                           "questions; reload it with: dikte restart", 1, running=True)
     lines = [
-        f"dictation: {reply.get('dictation', '?')}",
+        f"dictation: {reply.get('dictation', '?')}"
+        + ("  (paused)" if reply.get("paused") else ""),
         f"agent:     {reply.get('ask', '?')}  ({reply.get('agent', '?')})",
         f"meeting:   {reply.get('meeting', '?')}"
         + (f"  {reply['meeting_message']}" if reply.get("meeting_message") else ""),
@@ -879,6 +880,10 @@ def build_parser():
         page.add_argument("--timeout", type=float, default=0)
         page.set_defaults(func=cmd_toggle)
 
+    # One verb for both halves, the way `toggle` is one verb: a key can only be
+    # pressed, so a key that resumed nothing would need a second key.
+    leaf(subs, "pause", "hold the recording, or take it up again"
+         ).set_defaults(func=cmd_plain)
     leaf(subs, "cancel", "throw away the recording").set_defaults(func=cmd_cancel)
 
     # --- the agent --------------------------------------------------------

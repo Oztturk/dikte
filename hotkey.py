@@ -29,6 +29,7 @@ from i18n import t
 
 DESKTOP_ID = "dikte-toggle.desktop"
 CANCEL_DESKTOP_ID = "dikte-cancel.desktop"
+PAUSE_DESKTOP_ID = "dikte-pause.desktop"
 MEETING_DESKTOP_ID = "dikte-meeting.desktop"
 ASK_DESKTOP_ID = "dikte-ask.desktop"
 APPLICATIONS_DIR = pathlib.Path.home() / ".local/share/applications"
@@ -39,7 +40,7 @@ GNOME_BINDING_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys.custom-keyb
 
 Shortcut = collections.namedtuple("Shortcut", "verb desktop_id name setting fallback")
 
-# Every global shortcut in one place, because there are four of them and the
+# Every global shortcut in one place, because there are five of them and the
 # command line, the settings window and the installer each used to carry their
 # own copy of the list. `fallback` is what to register when the setting is
 # empty: only the toggle has one, since it is the key the application is
@@ -47,6 +48,8 @@ Shortcut = collections.namedtuple("Shortcut", "verb desktop_id name setting fall
 SHORTCUTS = {
     "toggle": Shortcut("toggle", DESKTOP_ID, "Dikte: start/stop recording",
                        "shortcut", "Ctrl+Space"),
+    "pause": Shortcut("pause", PAUSE_DESKTOP_ID,
+                      "Dikte: pause/resume the recording", "pause_shortcut", ""),
     "cancel": Shortcut("cancel", CANCEL_DESKTOP_ID, "Dikte: discard the recording",
                        "cancel_shortcut", ""),
     "ask": Shortcut("ask", ASK_DESKTOP_ID, "Dikte: ask Claude Code",

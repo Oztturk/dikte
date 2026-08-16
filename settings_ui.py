@@ -1321,6 +1321,14 @@ class SettingsWindow(QDialog):
             form, "toggle", t("Start and stop"),
             t("No global shortcut installed."), placeholder="Ctrl+Space",
         )
+        # The point of holding a recording is that something else came up, and
+        # something else is exactly when a hand is not free for a menu.
+        self._shortcut_row(
+            form, "pause", t("Pause and resume"),
+            t("No global shortcut installed. The tray menu holds it too."),
+            tooltip=t("Holds the recording without ending it. Nothing said "
+                      "while it is paused is kept, and the clock stops with it."),
+        )
         # Stopping is what sends the recording off to be transcribed, and that
         # is the step there is no taking back. By the time the tray menu is
         # open the sentence you did not mean to dictate is already on its way.
@@ -1700,8 +1708,8 @@ class SettingsWindow(QDialog):
         conf["file_cleanup"] = self.file_cleanup.isChecked()
 
         # Left empty, only the toggle falls back to a default: the application
-        # is unusable without it. The other three stay empty, which is what
-        # turns them off.
+        # is unusable without it. The rest stay empty, which is what turns
+        # them off.
         for which, (box, _status, _missing) in self._shortcut_rows.items():
             spec = hotkey.SHORTCUTS[which]
             conf[spec.setting] = (box.currentText().strip()

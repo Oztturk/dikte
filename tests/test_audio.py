@@ -280,6 +280,26 @@ class _StalledStream:
         self._released.set()
 
 
+class _HeldStream:
+    """A capture that is paused and taken up again partway through, the way a
+    key press lands in the middle of a recording rather than between two."""
+
+    def __init__(self, data, recorder, pause_at, resume_at=None):
+        self._data = io.BytesIO(data)
+        self._recorder = recorder
+        self._pause_at = pause_at
+        self._resume_at = resume_at
+        self.reads = 0
+
+    def read(self, size):
+        if self.reads == self._pause_at:
+            self._recorder.pause()
+        elif self.reads == self._resume_at:
+            self._recorder.pause(False)
+        self.reads += 1
+        return self._data.read(size)
+
+
 class RecordingCommand(OnLinux, DikteTest):
     """Which program captures the microphone, and how it is asked to."""
 
@@ -498,6 +518,51 @@ class RecorderChain(OnLinux, DikteTest):
         self.assertEqual(results, [])
         self.assertEqual(len(failures), 1)
         self.assertIn("0.3", failures[0])
+
+    def held(self, data, pause_at, resume_at=None):
+        """Record `data` with the recorder paused for part of it."""
+        recorder = audio.Recorder()
+        results = []
+        failures = []
+        recorder.stopped.connect(lambda *args: results.append(args))
+        recorder.failed.connect(failures.append)
+        proc = FakeProcess(data)
+        proc.stdout = _HeldStream(data, recorder, pause_at, resume_at)
+        with only_these_tools("pw-record"), \
+                mock.patch.object(subprocess, "Popen", return_value=proc):
+            recorder.start()
+            recorder._thread.join(timeout=5)
+            # Nothing has ended the capture: a pause holds the microphone.
+            self.assertEqual(proc.signals, [])
+            recorder.stop()
+        return results, failures
+
+    def test_what_is_said_while_it_is_held_is_not_in_the_recording(self):
+        """The phone call in the middle of a dictation is the whole feature: it
+        must not reach the transcript, and the two halves must meet."""
+        results, failures = self.held(tone(2.0), pause_at=8, resume_at=16)
+        self.assertEqual(failures, [])
+        path, duration, _ = results[0]
+        self.addCleanup(os.unlink, path)
+        dropped = 8 * audio.CHUNK_FRAMES
+        self.assertAlmostEqual(duration, (2 * audio.RATE - dropped) / audio.RATE,
+                               places=3)
+
+    def test_a_recording_held_all_the_way_through_captured_nothing(self):
+        results, failures = self.held(tone(2.0), pause_at=0)
+        self.assertEqual(results, [])
+        self.assertIn("0.3", failures[0])
+
+    def test_a_pause_does_not_outlive_the_recording_it_was_asked_for(self):
+        recorder = audio.Recorder()
+        recorder.pause()
+        proc = FakeProcess(tone(0.5))
+        with only_these_tools("pw-record"), \
+                mock.patch.object(subprocess, "Popen", return_value=proc):
+            recorder.start()
+            self.assertFalse(recorder.paused)
+            recorder._thread.join(timeout=5)
+            recorder.cancel()
 
     def test_a_recorder_that_could_not_start(self):
         recorder = audio.Recorder()

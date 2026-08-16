@@ -174,38 +174,69 @@ class Bindings(DikteTest):
 
 
 class Chooser(DikteTest):
-    """Which desktop is asked to register the shortcut."""
+    """Which mechanism the session gets, and everything keyed off that."""
 
     def setUp(self):
         super().setUp()
         self.patch_attr(hotkey.sys, "platform", "linux")
+        self.addCleanup(hotkey._REGISTERED.clear)
 
     @contextlib.contextmanager
-    def under(self, desktop, has_gsettings=True):
-        """A session that says it is this desktop, with or without gsettings."""
+    def under(self, desktop, tools=True):
+        """A session that says it is this desktop, with or without its tools."""
         with mock.patch.dict(os.environ, {"XDG_CURRENT_DESKTOP": desktop}), \
                 mock.patch.object(hotkey.shutil, "which",
-                                  return_value="/usr/bin/gsettings"
-                                  if has_gsettings else None):
+                                  return_value="/usr/bin/tool" if tools else None):
             yield
 
     def test_gnome_when_the_session_says_so_and_gsettings_is_there(self):
         with self.under("GNOME"):
+            self.assertEqual(hotkey.backend(), hotkey.GNOME)
             self.assertEqual(hotkey.desktop_name(), "GNOME")
 
-    def test_kde_otherwise(self):
+    def test_kde_when_the_session_says_so_and_kwriteconfig_is_there(self):
         with self.under("KDE"):
+            self.assertEqual(hotkey.backend(), hotkey.KDE)
             self.assertEqual(hotkey.desktop_name(), "KDE")
 
-    def test_a_gnome_session_with_no_gsettings_falls_back(self):
-        """Nothing to write the binding with, so KDE's file is the only try."""
-        with self.under("GNOME", has_gsettings=False):
-            self.assertEqual(hotkey.desktop_name(), "KDE")
+    def test_a_desktop_with_no_registry_is_the_listeners(self):
+        """The bug this replaced: i3 was told KDE, and KWin was not running."""
+        for desktop in ("i3", "XFCE", "X-Cinnamon", "sway", "MATE", ""):
+            with self.subTest(desktop=desktop), self.under(desktop):
+                self.assertEqual(hotkey.backend(), hotkey.LISTENER)
+
+    def test_the_desktop_that_has_no_registry_is_called_by_its_own_name(self):
+        with self.under("i3"):
+            self.assertEqual(hotkey.desktop_name(), "i3")
+        with self.under("XFCE:GNOME-Flashback", tools=False):
+            self.assertEqual(hotkey.desktop_name(), "XFCE")
+        with self.under(""):
+            self.assertEqual(hotkey.desktop_name(), "This desktop")
+
+    def test_a_gnome_session_with_no_gsettings_falls_back_to_the_listener(self):
+        """Nothing to write the binding with, and KDE's file is not an answer:
+        KWin is no more running here than it is on i3."""
+        with self.under("GNOME", tools=False):
+            self.assertEqual(hotkey.backend(), hotkey.LISTENER)
 
     def test_the_desktop_is_matched_loosely(self):
         for desktop in ("GNOME", "ubuntu:GNOME", "gnome"):
             with self.subTest(desktop=desktop), self.under(desktop):
-                self.assertEqual(hotkey.desktop_name(), "GNOME")
+                self.assertEqual(hotkey.backend(), hotkey.GNOME)
+        for desktop in ("KDE", "KDE:plasma", "plasma"):
+            with self.subTest(desktop=desktop), self.under(desktop):
+                self.assertEqual(hotkey.backend(), hotkey.KDE)
+
+    def test_only_a_registry_is_installed_into_and_only_kwin_waits(self):
+        with self.under("KDE"):
+            self.assertTrue(hotkey.installs_shortcuts())
+            self.assertTrue(hotkey.shortcut_needs_restart())
+        with self.under("GNOME"):
+            self.assertTrue(hotkey.installs_shortcuts())
+            self.assertFalse(hotkey.shortcut_needs_restart())
+        with self.under("i3"):
+            self.assertFalse(hotkey.installs_shortcuts())
+            self.assertFalse(hotkey.shortcut_needs_restart())
 
     def test_installing_goes_to_whichever_it_is(self):
         with self.under("GNOME"), \
@@ -220,6 +251,20 @@ class Chooser(DikteTest):
             hotkey.install_shortcut("Ctrl+Space", "dikte toggle")
         kde.assert_called_once()
 
+    def test_a_desktop_with_no_registry_installs_nothing_anywhere(self):
+        with self.under("i3"), \
+                mock.patch.object(hotkey, "install_kde_shortcut") as kde, \
+                mock.patch.object(hotkey, "install_gnome_shortcut") as gnome:
+            ok, message = hotkey.install_shortcut("Ctrl+Space", "dikte toggle")
+            self.assertEqual(hotkey.shortcut_status(), "Ctrl+Space")
+            hotkey.remove_shortcut()
+            self.assertIsNone(hotkey.shortcut_status())
+        kde.assert_not_called()
+        gnome.assert_not_called()
+        self.assertTrue(ok)
+        self.assertIn("i3", message)
+        self.assertNotIn("log out", message)
+
     def test_removing_and_reading_back_go_to_the_same_one(self):
         with self.under("GNOME"), \
                 mock.patch.object(hotkey, "remove_gnome_shortcut") as remove, \
@@ -229,6 +274,17 @@ class Chooser(DikteTest):
             self.assertEqual(hotkey.shortcut_status(), "Ctrl+Space")
         remove.assert_called_once()
         status.assert_called_once()
+
+    def test_only_kde_has_a_list_of_conflicts_to_read(self):
+        """A leftover kglobalshortcutsrc from a Plasma the user has since left
+        would otherwise refuse combinations nothing is holding."""
+        rc = self.path("kglobalshortcutsrc")
+        rc.write_text(SHORTCUTS_RC, encoding="utf-8")
+        self.patch_attr(hotkey, "SHORTCUTS_FILE", rc)
+        with self.under("KDE"):
+            self.assertTrue(hotkey.conflicting_shortcuts("Meta+W"))
+        with self.under("i3"):
+            self.assertEqual(hotkey.conflicting_shortcuts("Meta+W"), [])
 
 
 @linux_only
@@ -372,6 +428,12 @@ class KdeShortcut(DikteTest):
         self.rc = self.path("kglobalshortcutsrc")
         self.patch_attr(hotkey, "APPLICATIONS_DIR", self.apps)
         self.patch_attr(hotkey, "SHORTCUTS_FILE", self.rc)
+        # A Plasma session with kwriteconfig6 on it, whatever the machine
+        # running the suite happens to be logged into.
+        session = mock.patch.dict(os.environ, {"XDG_CURRENT_DESKTOP": "KDE"})
+        session.start()
+        self.addCleanup(session.stop)
+        self.patch_attr(hotkey.shutil, "which", lambda _name: "/usr/bin/tool")
 
     def test_installing_writes_a_desktop_file_kwin_will_launch(self):
         with mock.patch.object(subprocess, "run", return_value=FakeCompleted()):

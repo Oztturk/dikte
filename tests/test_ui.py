@@ -6,6 +6,7 @@ save, so a setting added to one half and not the other is silently reset the
 next time anybody presses Save. That is the failure this catches.
 """
 
+import os
 import sys
 import unittest
 from typing import ClassVar
@@ -107,13 +108,21 @@ class Settings(DikteTest):
     # one. Everything else about the window is the same on both.
     changed = CHANGED
     platform = "linux"
+    # A session with no shortcut registry, which is what most Linux desktops
+    # are. The subclasses below stand on the other two. Pinned rather than
+    # inherited from whatever the machine running the suite is logged into,
+    # since half the shortcut tab is built from the answer.
+    desktop = "i3"
+    tools: ClassVar[tuple] = ()
 
     def setUp(self):
         super().setUp()
         # No pactl, no model lists over the network, and no modal dialogue
         # waiting for somebody to press OK.
         self.enterContext(mock.patch.object(sys, "platform", self.platform))
-        self.enterContext(only_these_tools())
+        self.enterContext(only_these_tools(*self.tools))
+        self.enterContext(mock.patch.dict(
+            os.environ, {"XDG_CURRENT_DESKTOP": self.desktop}))
         self.enterContext(mock.patch.object(QMessageBox, "information"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_models"))
@@ -253,6 +262,31 @@ class Settings(DikteTest):
     def test_every_global_shortcut_has_a_row_of_its_own(self):
         window = self.window(cfg.Config())
         self.assertEqual(set(window._shortcut_rows), set(hotkey.SHORTCUTS))
+
+    def shortcut_tab_text(self, window):
+        """Everything the shortcut tab says, as one string."""
+        return "\n".join(
+            widget.text() for widget in
+            window.findChildren(settings_ui.QLabel)
+            + window.findChildren(settings_ui.QLineEdit)
+            + window.findChildren(settings_ui.QPushButton)
+        )
+
+    def test_the_shortcut_tab_talks_about_this_session_and_no_other(self):
+        """A desktop with no registry is told the truth: nothing is installed
+        anywhere, Dikte is listening, and here is the command to bind if the
+        desktop should own the keys instead. It used to be promised a KWin that
+        was not running."""
+        window = self.window(cfg.Config())
+        text = self.shortcut_tab_text(window)
+        self.assertIn("i3 keeps no shortcut registry", text)
+        self.assertNotIn("KWin", text)
+        self.assertIn("dikte.py toggle", text)
+        # Not a choice to offer where it is the only mechanism there is.
+        self.assertTrue(window.evdev_enabled.isHidden())
+        self.assertFalse([button for button in
+                          window.findChildren(settings_ui.QPushButton)
+                          if "install" in button.text().lower()])
 
     def test_emptying_a_shortcut_turns_it_off_but_not_the_toggle(self):
         """The application is unusable without the toggle, so that one box
@@ -415,13 +449,43 @@ class MacSettings(Settings):
     def test_the_listener_is_not_offered_as_a_choice(self):
         """It is the whole mechanism there; turning it off would leave nothing."""
         window = self.window(cfg.Config())
-        self.assertFalse(window.evdev_enabled.isVisible())
+        self.assertTrue(window.evdev_enabled.isHidden())
+
+    def test_the_shortcut_tab_talks_about_this_session_and_no_other(self):
+        """Carbon holds the keys here, so there is no command to bind and no
+        /dev/input to be let into."""
+        window = self.window(cfg.Config())
+        text = self.shortcut_tab_text(window)
+        self.assertIn("Dikte asks macOS for these combinations", text)
+        self.assertNotIn("KWin", text)
+        self.assertNotIn("dikte.py toggle", text)
 
     def test_the_paste_keys_on_offer_are_the_ones_a_mac_uses(self):
         window = self.window(cfg.Config())
         offered = [window.paste_shortcut.itemText(index)
                    for index in range(window.paste_shortcut.count())]
         self.assertEqual(offered, paste.MACOS.shortcuts)
+
+
+class KdeSettings(Settings):
+    """The same window on the one desktop that keeps a registry and makes you
+    wait for it. Nothing here is about KDE: it is the rest of the window,
+    checked on the platform where Install, Remove and the listener's own
+    checkbox are all on screen."""
+
+    desktop = "KDE"
+    tools: ClassVar[tuple] = ("kwriteconfig6",)
+
+    def test_the_shortcut_tab_talks_about_this_session_and_no_other(self):
+        window = self.window(cfg.Config())
+        text = self.shortcut_tab_text(window)
+        self.assertIn("KWin only reads shortcut settings at startup", text)
+        self.assertIn("Install as a KDE shortcut", text)
+        self.assertNotIn("keeps no shortcut registry", text)
+        self.assertNotIn("dikte.py toggle", text)
+        # Here it is a choice: the wait for the next login, or the key press
+        # reaching the focused application as well.
+        self.assertFalse(window.evdev_enabled.isHidden())
 
 
 class Overlay(DikteTest):

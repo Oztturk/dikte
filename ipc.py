@@ -28,7 +28,11 @@ def script_path():
 
 
 def command_for(verb):
-    """The command line a KDE shortcut runs for one of the verbs."""
+    """The command line a desktop's shortcut runs for one of the verbs.
+
+    Also what Settings shows an i3 or XFCE user to paste into their own
+    configuration, since there is no registry there for Dikte to write into.
+    """
     return f"{sys.executable} {script_path()} {verb}"
 
 

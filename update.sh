@@ -25,7 +25,7 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
 die()  { printf '  \033[31m✗\033[0m %s\n' "$1"; echo; exit 1; }
 
 # The combination stored in the settings, which is where Dikte itself reads it
-# from and the one place that is the same on KDE and on GNOME.
+# from and the one place that is the same whichever mechanism the session has.
 setting() {
   [[ -n "$PY" ]] || return 0
   "$PY" "$DIR/dikte.py" config get "$1" 2>/dev/null || true

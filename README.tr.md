@@ -4,7 +4,8 @@
 çevrilir, bir model transkripti temizler (ıı'lar, tekrarlar, eksik noktalama),
 sonuç panoya kopyalanır ve o an yazdığın pencereye yapıştırılır.
 
-KDE Plasma 6 / Wayland için yazıldı, GNOME X11 ve macOS'ta da çalışır. Sistem
+KDE Plasma 6 / Wayland için yazıldı; GNOME X11'de, macOS'ta ve klavyeyi
+okumasına izin veren diğer Linux masaüstlerinde de çalışır. Sistem
 paketleri dışında bağımlılığı yok: sadece Python standart kütüphanesi (3.11 veya
 üstü) ve PyQt6.
 
@@ -182,14 +183,18 @@ olmasını ister.
   silebilirsin.
 - **Türkçe ve İngilizce arayüz**, varsayılan olarak sistem dilini izler.
 
-## Global kısayollar için bir kez oturum kapatmak gerekir
+## Global kısayollar ve KDE'nin istediği oturum kapatma
 
 KWin `kglobalshortcutsrc` dosyasını yalnızca açılışta okur, yani `install.sh`'ın
 yazdığı kısayollar oturumu yeniden açana kadar tetiklenmez. O zamana kadar Ayarlar →
 Kısayollar → **yerleşik dinleyici** `/dev/input` üzerinden kombinasyonu kendisi
 yakalar. Tek farkı: tuşu yutmaz, yani `Ctrl+Space` odaktaki uygulamaya da iletilir
 (bazı editörlerde otomatik tamamlama açılabilir). Dinleyici kullanıcının `input`
-grubunda olmasını gerektirir: `sudo usermod -aG input $USER`.
+grubunda olmasını gerektirir: `sudo usermod -aG input $USER`. GNOME'da kısayol
+kurulduğu anda çalışır; hiç kayıt defteri tutmayan masaüstlerinde (i3, XFCE,
+sway ve çoğu diğeri) dinleyici mekanizmanın kendisidir: hiçbir şey kurulmaz,
+oturum kapatmak gerekmez, tuşları masaüstünün sahiplenmesini istersen Ayarlar →
+Kısayollar sekmesi bağlanacak komutu gösterir.
 
 ## Dosyalar
 
@@ -209,7 +214,7 @@ vad.py            kayıtta gerçekten konuşma var mı kararı
 filetranscribe.py dosyadan transkript: ffmpeg, parçalama, zaman damgaları
 overlay.py        köşedeki gösterge
 settings_ui.py    ayarlar penceresi
-hotkey.py         KDE kısayol kurulumu, evdev dinleyici, Mac'te Carbon
+hotkey.py         masaüstünün kısayol kaydı, evdev dinleyici, Mac'te Carbon
 paste.py          wl-clipboard ve ydotool sarmalayıcıları, pbcopy ve CoreGraphics
 trayicon.py       tepsi simgeleri, ikon teması olmayan yerler için çizilmiş
 i18n.py           metin tablosu

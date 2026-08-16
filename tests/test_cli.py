@@ -12,13 +12,13 @@ import json
 import unittest
 from unittest import mock
 
-import audio
-import cli
-import config as cfg
-import ggml
-import hotkey
-import ipc
-import paste
+from dikte import audio
+from dikte import cli
+from dikte import config as cfg
+from dikte import ggml
+from dikte import hotkey
+from dikte import ipc
+from dikte import paste
 from tests.support import DikteTest, fake_urlopen, only_these_tools
 
 
@@ -165,7 +165,7 @@ class Parser(unittest.TestCase):
                                  name)
 
     def test_every_verb_is_wired_to_something(self):
-        for verb in ("record", "toggle", "start", "stop", "cancel", "ask",
+        for verb in ("record", "toggle", "start", "stop", "pause", "cancel", "ask",
                      "session", "transcribe", "meeting", "meetings", "history",
                      "config", "prompt", "devices", "models", "test-key",
                      "doctor", "shortcut", "status", "settings", "restart",
@@ -659,6 +659,14 @@ class Replies(DikteTest):
         with mock.patch.object(ipc, "send", return_value={"ok": True, "legacy": True}), \
                 captured():
             self.assertEqual(cli.run(["cancel"]), 0)
+
+    def test_pausing_a_recording_nobody_started_is_not_a_failure_either(self):
+        """A key that pauses can be pressed when there is nothing to pause, and
+        it must not start an application to tell you so."""
+        with mock.patch.object(ipc, "send", return_value=None), \
+                mock.patch.object(cli, "launch_gui") as launched, captured():
+            self.assertEqual(cli.run(["pause"]), 0)
+        self.assertFalse(launched.called)
 
 
 class TranscribeRunsHere(DikteTest):

@@ -58,10 +58,10 @@ entry in a table, and one chooser picks between them, so a fifth adds an entry
 and a line rather than a branch inside every function. The tables are
 `paste.Desktop` (clipboard and key press), `audio.Sound` (capture, the device
 lists, and whether the far side of a meeting can be recorded at all),
-`paths.directories()` (where the settings and the data live) and the
-`_macos()`/`_windows()`/`_gnome()` set in `hotkey.py`. Keep `sys.platform` inside
-the chooser and read it there every time: a constant settled at import is one no
-test can stand somewhere else.
+`paths.directories()` (where the settings and the data live) and `hotkey.backend()`,
+which names the one mechanism a session has for holding a key. Keep `sys.platform`
+inside the chooser and read it there every time: a constant settled at import is
+one no test can stand somewhere else.
 
 Where a platform cannot do something, say so in its table entry rather than in
 the code that asks. `audio.Sound.meetings` is the shape of it: Windows offers no
@@ -70,7 +70,7 @@ there can tell that apart from an empty device list, which only means the tool
 that lists them is not installed.
 
 The tests are split along the same line, and almost none of them are skipped.
-1009 of the 1052 run on any machine, including every line of the Wayland, X11,
+1067 of the 1110 run on any machine, including every line of the Wayland, X11,
 macOS and Windows backends: the programs are faked at `shutil.which`, the
 frameworks and system libraries at the one function that loads them
 (`paste._win_api`, `hotkey._win_input`). A test class says which system it is

@@ -23,8 +23,8 @@ import threading
 import urllib.error
 import urllib.request
 
-import ggml
-from i18n import t
+from . import ggml
+from .i18n import t
 
 APP_URL = "https://github.com/yusufipk/dikte"
 USER_AGENT = f"dikte/1.0 (+{APP_URL})"

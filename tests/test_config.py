@@ -12,12 +12,12 @@ import sys
 import unittest
 from unittest import mock
 
-import api
-import cleanup
-import config as cfg
-import ggml
-import i18n
-import paste
+from dikte import api
+from dikte import cleanup
+from dikte import config as cfg
+from dikte import ggml
+from dikte import i18n
+from dikte import paste
 from tests.support import DikteTest
 
 

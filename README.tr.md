@@ -4,9 +4,10 @@
 çevrilir, bir model transkripti temizler (ıı'lar, tekrarlar, eksik noktalama),
 sonuç panoya kopyalanır ve o an yazdığın pencereye yapıştırılır.
 
-KDE Plasma 6 / Wayland için yazıldı, GNOME X11, macOS ve
-[Windows](README.windows.md)'ta da çalışır. Sistem paketleri dışında bağımlılığı
-yok: sadece Python standart kütüphanesi (3.11 veya üstü) ve PyQt6.
+KDE Plasma 6 / Wayland için yazıldı; GNOME X11'de, macOS'ta,
+[Windows](README.windows.md)'ta ve klavyeyi okumasına izin veren diğer Linux
+masaüstlerinde de çalışır. Sistem paketleri dışında bağımlılığı yok: sadece
+Python standart kütüphanesi (3.11 veya üstü) ve PyQt6.
 
 *[English README](README.md)*
 
@@ -54,7 +55,7 @@ araçlarıyla çalışır:
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
 
-macOS'ta da aynı `./install.sh` çalışır, işi `install-mac.sh`'a devreder;
+macOS'ta da aynı `./install.sh` çalışır, işi `scripts/install-mac.sh`'a devreder;
 `~/Applications` içine bir `Dikte.app`, `dikte` komutunu ve bir LaunchAgent
 kurar:
 
@@ -83,15 +84,15 @@ gerekmiyor.
 
 Windows da aynı şekilde çalışıyor, Dikte açıkken kombinasyonu sistemin kendi
 kısayol servisi üzerinden tutuyor: `winget install Gyan.FFmpeg`, `pip install
-PyQt6`, sonra `python dikte.py`; Başlat Menüsü girdisi ve `dikte` komutu için
+PyQt6`, sonra `python -m dikte`; Başlat Menüsü girdisi ve `dikte` komutu için
 isteğe bağlı `install.ps1`. Orada toplantı kaydı henüz yok, ayrıntılar
 [Windows README](README.windows.md)'sinde.
 
 `install.sh` `dikte` komutunu, menü girdisini, oturum açılışında otomatik
-başlatmayı ve iki global kısayolu kurar; tuşları da iki argümanı. `./update.sh`
-son sürümü çeker ve bunları senin seçtiğin tuşlarla yerine koyar;
-`./uninstall.sh` hepsini geri alır, `--purge` demedikçe ayarlarına ve
-diktelerine dokunmaz.
+başlatmayı ve iki global kısayolu kurar; tuşları iki argümanı, argüman
+verilmezse ayarlarında duranlar. `./scripts/update.sh` son sürümü çeker ve
+bunları yerine koyar; `./scripts/uninstall.sh` hepsini geri alır, `--purge`
+demedikçe ayarlarına ve diktelerine dokunmaz.
 
 Sesi yazıya çevirme ve temizleme, ayarlar penceresinde ayrı ayrı sağlayıcı
 seçer; ikisi de varsayılan olarak burada, kendi modellerinle çalışır. Bulutu
@@ -109,6 +110,7 @@ yanındaki kutudan düşünme seviyesini de seçebilirsin.
 | Ne | Nasıl |
 | --- | --- |
 | Kaydı başlat / bitir | `Ctrl+Space`, ya da tepsi simgesine tıkla |
+| Kaydı duraklat / sürdür | Tepsi menüsü, `dikte pause`, ya da atadığın bir tuş |
 | Kaydı iptal et | `Ctrl+Alt+Space`, tepsi menüsü, ya da `dikte cancel` |
 | Ajana sesle komut ver | Tepsi menüsü → *Claude'a sor*, ya da `dikte ask` |
 | Toplantıyı başlat / bitir | Tepsi menüsü → *Toplantı kaydet*, ya da `dikte meeting` |
@@ -187,19 +189,28 @@ olmasını ister.
   silebilirsin.
 - **Türkçe ve İngilizce arayüz**, varsayılan olarak sistem dilini izler.
 
-## Global kısayollar için bir kez oturum kapatmak gerekir
+## Global kısayollar ve KDE'nin istediği oturum kapatma
 
 KWin `kglobalshortcutsrc` dosyasını yalnızca açılışta okur, yani `install.sh`'ın
 yazdığı kısayollar oturumu yeniden açana kadar tetiklenmez. O zamana kadar Ayarlar →
 Kısayollar → **yerleşik dinleyici** `/dev/input` üzerinden kombinasyonu kendisi
 yakalar. Tek farkı: tuşu yutmaz, yani `Ctrl+Space` odaktaki uygulamaya da iletilir
 (bazı editörlerde otomatik tamamlama açılabilir). Dinleyici kullanıcının `input`
-grubunda olmasını gerektirir: `sudo usermod -aG input $USER`.
+grubunda olmasını gerektirir: `sudo usermod -aG input $USER`. GNOME'da kısayol
+kurulduğu anda çalışır; hiç kayıt defteri tutmayan masaüstlerinde (i3, XFCE,
+sway ve çoğu diğeri) dinleyici mekanizmanın kendisidir: hiçbir şey kurulmaz,
+oturum kapatmak gerekmez, tuşları masaüstünün sahiplenmesini istersen Ayarlar →
+Kısayollar sekmesi bağlanacak komutu gösterir.
 
 ## Dosyalar
 
+Aşağıdakilerin hepsi `dikte` paketinin içinde: `python3 -m dikte` bunu çalıştırır,
+içindeki `__main__.py` de her başlatıcının ve kısayolun adlandırdığı dosyadır.
+`scripts/` altında install-mac.sh, update.sh ve uninstall.sh var; install.sh en
+üstte kalır, `tests/` içinde de her modülün bir dosyası.
+
 ```
-dikte.py          giriş noktası, tepsi simgesi, durum makinesi
+app.py            giriş noktası, tepsi simgesi, durum makinesi
 cli.py            komut satırı: bütün fiiller ve verdikleri cevap
 ipc.py            yerel sokette bir istek, bir cevap
 audio.py          PCM kaydı: diktede pw-record, toplantıda ffmpeg
@@ -214,14 +225,14 @@ vad.py            kayıtta gerçekten konuşma var mı kararı
 filetranscribe.py dosyadan transkript: ffmpeg, parçalama, zaman damgaları
 overlay.py        köşedeki gösterge
 settings_ui.py    ayarlar penceresi
-hotkey.py         KDE kısayol kurulumu, evdev dinleyici, Mac'te Carbon
+hotkey.py         masaüstünün kısayol kaydı, evdev dinleyici, Mac'te Carbon
 paste.py          wl-clipboard ve ydotool sarmalayıcıları, pbcopy ve CoreGraphics
 trayicon.py       tepsi simgeleri, ikon teması olmayan yerler için çizilmiş
 i18n.py           metin tablosu
 ```
 
 Gösterge XWayland üzerinden çizilir; Wayland'da bir pencereyi belirli bir köşeye
-yerleştirmenin yolu yok, `dikte.py` bu yüzden `QT_QPA_PLATFORM=xcb` ayarlar.
+yerleştirmenin yolu yok, `app.py` bu yüzden `QT_QPA_PLATFORM=xcb` ayarlar.
 
 ## Lisans
 

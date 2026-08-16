@@ -31,7 +31,7 @@ import wave
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from i18n import t
+from .i18n import t
 
 # Console programs started from a windowless process would otherwise each open
 # a console window of their own on Windows.
@@ -89,11 +89,30 @@ class Recorder(QObject):
         self._rms = []
         self._cancelled = False
         self._stopping = False
+        self._paused = False
         self._lock = threading.Lock()
 
     @property
     def active(self):
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def paused(self):
+        return self._paused
+
+    def pause(self, value=True):
+        """Stop taking sound in without letting go of the microphone.
+
+        The capture program keeps running and keeps handing blocks over; they
+        are dropped as they arrive rather than kept. Stopping it instead would
+        mean asking the sound server for the device again on the way back, and
+        that is the one moment another application can take it: a recording
+        would be lost to the phone call it was paused for.
+
+        What was said while it was paused is gone, which is the point. The two
+        halves meet as one splice, with none of the room in between.
+        """
+        self._paused = bool(value)
 
     def start(self, target="", max_seconds=300):
         if self.active:
@@ -120,6 +139,7 @@ class Recorder(QObject):
         self._rms = []
         self._cancelled = False
         self._stopping = False
+        self._paused = False
         self._max_bytes = int(max_seconds * RATE * SAMPLE_WIDTH * CHANNELS)
         self._thread = threading.Thread(target=self._pump, daemon=True)
         self._thread.start()
@@ -132,6 +152,11 @@ class Recorder(QObject):
                 chunk = stdout.read(CHUNK_BYTES)
                 if not chunk:
                     break
+                if self._paused:
+                    # Read and thrown away rather than left in the pipe: a pipe
+                    # nobody empties fills up, and the capture program blocks on
+                    # a full one instead of waiting quietly for the resume.
+                    continue
                 peak, rms = chunk_levels(chunk)
                 with self._lock:
                     self._buffer.extend(chunk)

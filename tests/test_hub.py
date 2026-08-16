@@ -2,7 +2,7 @@
 
 import json
 
-import hub
+from dikte import hub
 from tests.support import DikteTest, fake_urlopen, http_error, url_error
 
 RELEASE = {

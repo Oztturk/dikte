@@ -11,7 +11,7 @@ import sys
 import unittest
 from unittest import mock
 
-import ipc
+from dikte import ipc
 
 
 class FakeSocket:
@@ -57,7 +57,7 @@ class FakeSocket:
 
 class Paths(unittest.TestCase):
     def test_script_path_points_at_dikte(self):
-        self.assertTrue(ipc.script_path().endswith("dikte.py"))
+        self.assertTrue(ipc.script_path().endswith("dikte/__main__.py"))
         self.assertTrue(os.path.exists(ipc.script_path()))
 
     def test_the_shortcut_command_runs_it_with_this_interpreter(self):

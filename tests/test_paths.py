@@ -9,9 +9,9 @@ import os
 import unittest
 from unittest import mock
 
-import config as cfg
-import ggml
-import paths
+from dikte import config as cfg
+from dikte import ggml
+from dikte import paths
 
 
 class Directories(unittest.TestCase):

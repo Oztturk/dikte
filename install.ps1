@@ -11,6 +11,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repo = $PSScriptRoot
+# The one file that starts the application, whoever is asking: the Start Menu
+# entry, the autostart entry and the dikte command all name it.
+$entry = Join-Path $repo "dikte\__main__.py"
 $startMenu = [Environment]::GetFolderPath("Programs")
 $startup = [Environment]::GetFolderPath("Startup")
 $shortcut = Join-Path $startMenu "Dikte.lnk"
@@ -55,7 +58,7 @@ $shell = New-Object -ComObject WScript.Shell
 foreach ($path in @($shortcut) + $(if ($Autostart) { @($autostartLink) } else { @() })) {
     $link = $shell.CreateShortcut($path)
     $link.TargetPath = $pythonw
-    $link.Arguments = "`"$repo\dikte.py`" --gui"
+    $link.Arguments = "`"$entry`" --gui"
     $link.WorkingDirectory = $repo
     $link.Description = "Dikte: dictation"
     $link.Save()
@@ -67,11 +70,11 @@ foreach ($path in @($shortcut) + $(if ($Autostart) { @($autostartLink) } else { 
 # the one the command line should run, whatever a later PATH change puts first.
 $shimDir = Split-Path $cmdShim
 if (Test-Path $shimDir) {
-    "@echo off`r`n`"$($python.Source)`" `"$repo\dikte.py`" %*" |
+    "@echo off`r`n`"$($python.Source)`" `"$entry`" %*" |
         Out-File $cmdShim -Encoding ascii
     Write-Host "command: dikte  ($cmdShim)"
 } else {
-    Write-Warning "No $shimDir on this machine, so there is no dikte command. Run it as: python `"$repo\dikte.py`""
+    Write-Warning "No $shimDir on this machine, so there is no dikte command. Run it as: python `"$entry`""
 }
 
 Write-Host ""

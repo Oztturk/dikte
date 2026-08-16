@@ -13,8 +13,8 @@ import unittest
 import wave
 from unittest import mock
 
-import api
-import filetranscribe as ft
+from dikte import api
+from dikte import filetranscribe as ft
 from tests.support import DikteTest, make_wav, silence, tone
 
 

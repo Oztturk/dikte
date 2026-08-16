@@ -6,21 +6,24 @@ save, so a setting added to one half and not the other is silently reset the
 next time anybody presses Save. That is the failure this catches.
 """
 
+import os
 import sys
 import unittest
 from typing import ClassVar
 from unittest import mock
 
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-import audio
-import cleanup
-import config as cfg
-import ggml
-import hotkey
-import overlay as overlay_module
-import paste
-import settings_ui
+from dikte import audio
+from dikte import cleanup
+from dikte import config as cfg
+from dikte import ggml
+from dikte import hotkey
+from dikte import overlay as overlay_module
+from dikte import paste
+from dikte import settings_ui
 from tests.support import DikteTest, only_these_tools
 
 # One application for the whole run; Qt allows no second one.
@@ -96,6 +99,7 @@ CHANGED = {
     "file_cleanup": False,
     "shortcut": "Ctrl+Alt+Space",
     "cancel_shortcut": "Meta+Shift+Space",
+    "pause_shortcut": "Meta+P",
     "evdev_hotkey": True,
     "history_limit": 50,
 }
@@ -106,18 +110,30 @@ class Settings(DikteTest):
     # one. Everything else about the window is the same on both.
     changed = CHANGED
     platform = "linux"
+    # A session with no shortcut registry, which is what most Linux desktops
+    # are. The subclasses below stand on the other two. Pinned rather than
+    # inherited from whatever the machine running the suite is logged into,
+    # since half the shortcut tab is built from the answer.
+    desktop = "i3"
+    tools: ClassVar[tuple] = ()
 
     def setUp(self):
         super().setUp()
         # No pactl, no model lists over the network, and no modal dialogue
         # waiting for somebody to press OK.
         self.enterContext(mock.patch.object(sys, "platform", self.platform))
-        self.enterContext(only_these_tools())
+        self.enterContext(only_these_tools(*self.tools))
+        self.enterContext(mock.patch.dict(
+            os.environ, {"XDG_CURRENT_DESKTOP": self.desktop}))
         self.enterContext(mock.patch.object(QMessageBox, "information"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_models"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_transcribe_models"))
+        # The local model boxes fetch their own list the moment they are shown,
+        # from a thread, which is nobody's test failing but a real request.
+        self.enterContext(mock.patch.object(settings_ui.LocalModelBox,
+                                            "_fetch_models"))
         self.enterContext(mock.patch.object(settings_ui.hotkey, "APPLICATIONS_DIR",
                                             self.path("applications")))
         self.enterContext(mock.patch.object(settings_ui.hotkey, "SHORTCUTS_FILE",
@@ -129,11 +145,80 @@ class Settings(DikteTest):
         self.addCleanup(window.close)
         return window
 
+    @staticmethod
+    def wheel():
+        """One notch of a mouse wheel, rolled downwards."""
+        return QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0),
+                           QPoint(0, -120), Qt.MouseButton.NoButton,
+                           Qt.KeyboardModifier.NoModifier,
+                           Qt.ScrollPhase.NoScrollPhase, False)
+
     def test_the_window_opens_with_every_tab_on_it(self):
         window = self.window(cfg.Config())
         tabs = window.findChildren(settings_ui.QTabWidget)[0]
         self.assertEqual(tabs.count(), 9)
         self.assertEqual(window.windowTitle(), "Dikte Settings")
+
+    def test_no_tab_can_stretch_the_window_past_a_small_screen(self):
+        # A tab that keeps its full height hands that height to the window as a
+        # minimum, and a tall one then carries Save off the bottom of a laptop
+        # screen with no way to drag it back. Each tab scrolls instead.
+        window = self.window(cfg.Config())
+        for index in range(window.tabs.count()):
+            window.tabs.setCurrentIndex(index)
+            self.assertLess(window.minimumSizeHint().height(), 500,
+                            window.tabs.tabText(index))
+
+    def test_the_window_cannot_be_dragged_down_to_a_stub(self):
+        # A tab that scrolls asks for no height of its own, which leaves nothing
+        # to stop the window being pulled down to a tab bar and half a button.
+        window = self.window(cfg.Config())
+        window.resize(1, 1)
+        self.assertGreaterEqual(window.width(), 500)
+        self.assertGreaterEqual(window.height(), 360)
+
+    def test_the_wheel_passes_over_a_box_it_was_not_aimed_at(self):
+        # Every tab scrolls now, and a combo box reads the wheel as a change of
+        # value: rolling down the page with the pointer over the language box
+        # would pick another language on the way past, and Save would write it
+        # down. The box takes the wheel once it has been clicked into.
+        window = self.window(cfg.Config())
+        # Shown and activated, because a box in a window nobody is looking at
+        # can be given the focus but never has it.
+        window.show()
+        window.activateWindow()
+        QApplication.processEvents()
+        box = window.ui_language
+        # Not the wheel focus a combo box has by default: Qt hands the focus
+        # over before it delivers the wheel, which would make "has the focus"
+        # true for the very roll being refused.
+        self.assertEqual(box.focusPolicy(), Qt.FocusPolicy.StrongFocus)
+        before = box.currentIndex()
+        rolled = self.wheel()
+        QApplication.sendEvent(box, rolled)
+        self.assertEqual(box.currentIndex(), before)
+        # Refused, not swallowed. An unaccepted wheel event is the one Qt
+        # carries on up to the scroll area, so the page moves instead.
+        self.assertFalse(rolled.isAccepted())
+        box.setFocus()
+        QApplication.sendEvent(box, self.wheel())
+        self.assertNotEqual(box.currentIndex(), before)
+
+    def test_a_wrapped_label_keeps_the_room_its_lines_need(self):
+        # The program path shares a row with a button, and a row is measured
+        # before its width is known: the label has to claim the second line back
+        # itself, and give it up again when the window is widened.
+        label = settings_ui.WrappedLabel()
+        # Shown, because a hidden widget is told about its new size only once
+        # somebody looks at it, and the height is worked out from that size.
+        label.show()
+        self.addCleanup(label.deleteLater)
+        line = label.fontMetrics().height()
+        label.resize(120, line)
+        label.setText("Installed on the system: /opt/homebrew/bin/whisper-server")
+        self.assertGreater(label.minimumHeight(), line)
+        label.resize(2000, line)
+        self.assertLessEqual(label.minimumHeight(), line)
 
     def test_saving_without_touching_anything_changes_nothing(self):
         """Every widget has to load what is stored, or Save writes its default
@@ -180,6 +265,31 @@ class Settings(DikteTest):
         window = self.window(cfg.Config())
         self.assertEqual(set(window._shortcut_rows), set(hotkey.SHORTCUTS))
 
+    def shortcut_tab_text(self, window):
+        """Everything the shortcut tab says, as one string."""
+        return "\n".join(
+            widget.text() for widget in
+            window.findChildren(settings_ui.QLabel)
+            + window.findChildren(settings_ui.QLineEdit)
+            + window.findChildren(settings_ui.QPushButton)
+        )
+
+    def test_the_shortcut_tab_talks_about_this_session_and_no_other(self):
+        """A desktop with no registry is told the truth: nothing is installed
+        anywhere, Dikte is listening, and here is the command to bind if the
+        desktop should own the keys instead. It used to be promised a KWin that
+        was not running."""
+        window = self.window(cfg.Config())
+        text = self.shortcut_tab_text(window)
+        self.assertIn("i3 keeps no shortcut registry", text)
+        self.assertNotIn("KWin", text)
+        self.assertIn("__main__.py toggle", text)
+        # Not a choice to offer where it is the only mechanism there is.
+        self.assertTrue(window.evdev_enabled.isHidden())
+        self.assertFalse([button for button in
+                          window.findChildren(settings_ui.QPushButton)
+                          if "install" in button.text().lower()])
+
     def test_emptying_a_shortcut_turns_it_off_but_not_the_toggle(self):
         """The application is unusable without the toggle, so that one box
         falls back. The rest stay empty, which is how they are switched off.
@@ -196,6 +306,7 @@ class Settings(DikteTest):
         self.assertTrue(conf["shortcut"])
         self.assertEqual(conf["shortcut"], hotkey.default_combo("toggle"))
         self.assertEqual(conf["cancel_shortcut"], "")
+        self.assertEqual(conf["pause_shortcut"], "")
         self.assertEqual(conf["assistant_shortcut"], "")
         self.assertEqual(conf["meeting_shortcut"], "")
 
@@ -340,13 +451,43 @@ class MacSettings(Settings):
     def test_the_listener_is_not_offered_as_a_choice(self):
         """It is the whole mechanism there; turning it off would leave nothing."""
         window = self.window(cfg.Config())
-        self.assertFalse(window.evdev_enabled.isVisible())
+        self.assertTrue(window.evdev_enabled.isHidden())
+
+    def test_the_shortcut_tab_talks_about_this_session_and_no_other(self):
+        """Carbon holds the keys here, so there is no command to bind and no
+        /dev/input to be let into."""
+        window = self.window(cfg.Config())
+        text = self.shortcut_tab_text(window)
+        self.assertIn("Dikte asks macOS for these combinations", text)
+        self.assertNotIn("KWin", text)
+        self.assertNotIn("__main__.py toggle", text)
 
     def test_the_paste_keys_on_offer_are_the_ones_a_mac_uses(self):
         window = self.window(cfg.Config())
         offered = [window.paste_shortcut.itemText(index)
                    for index in range(window.paste_shortcut.count())]
         self.assertEqual(offered, paste.MACOS.shortcuts)
+
+
+class KdeSettings(Settings):
+    """The same window on the one desktop that keeps a registry and makes you
+    wait for it. Nothing here is about KDE: it is the rest of the window,
+    checked on the platform where Install, Remove and the listener's own
+    checkbox are all on screen."""
+
+    desktop = "KDE"
+    tools: ClassVar[tuple] = ("kwriteconfig6",)
+
+    def test_the_shortcut_tab_talks_about_this_session_and_no_other(self):
+        window = self.window(cfg.Config())
+        text = self.shortcut_tab_text(window)
+        self.assertIn("KWin only reads shortcut settings at startup", text)
+        self.assertIn("Install as a KDE shortcut", text)
+        self.assertNotIn("keeps no shortcut registry", text)
+        self.assertNotIn("__main__.py toggle", text)
+        # Here it is a choice: the wait for the next login, or the key press
+        # reaching the focused application as well.
+        self.assertFalse(window.evdev_enabled.isHidden())
 
 
 class Overlay(DikteTest):
@@ -392,6 +533,27 @@ class Overlay(DikteTest):
         widget.show_done("Pasted")
         widget._conceal()
         self.assertFalse(widget.showing)
+
+    def test_a_held_recording_says_so_and_stops_moving(self):
+        """Everything about the ribbon says a recording is running; a pause the
+        ribbon did not show would leave all of it saying the opposite."""
+        widget = self.overlay()
+        widget.show_recording()
+        widget.push_level(0.8)
+        widget.set_paused(True)
+        levels = list(widget.levels)
+        widget._tick()
+        self.assertEqual(widget.levels, levels)
+        widget.set_paused(False)
+        widget._tick()
+        self.assertNotEqual(widget.levels, levels)
+
+    def test_a_new_recording_is_never_the_last_one_still_held(self):
+        widget = self.overlay()
+        widget.show_recording()
+        widget.set_paused(True)
+        widget.show_recording()
+        self.assertFalse(widget.paused)
 
     def test_a_meeting_shows_both_sides(self):
         widget = self.overlay()

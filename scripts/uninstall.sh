@@ -4,7 +4,10 @@
 # is the word that deletes them.
 set -euo pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The checkout, one level up: this script lives in scripts/, everything it
+# touches is at the top of the tree.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENTRY="$DIR/dikte/__main__.py"
 USER_NAME="$(id -un)"
 BIN_DIR="$HOME/.local/bin"
 
@@ -29,6 +32,7 @@ else
   MACOS=0
   APP_DIR="$HOME/.local/share/applications"
   AUTOSTART_DIR="$HOME/.config/autostart"
+  ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
   CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dikte"
   DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/dikte"
   PY="$(command -v python3 || true)"
@@ -48,7 +52,7 @@ count() {
 
 usage() {
   cat <<EOF
-Usage: ./uninstall.sh [--purge] [--yes]
+Usage: ./scripts/uninstall.sh [--purge] [--yes]
 
   --purge   also delete the settings ($CONFIG_DIR)
             and the dictations, meetings and recordings ($DATA_DIR)
@@ -84,17 +88,24 @@ echo "──────────────────"
 
 # 1. Global shortcuts ------------------------------------------------------
 # Handed to Dikte while it can still run, because it is the half that knows
-# whether they went into KDE's kglobalshortcutsrc or GNOME's gsettings. macOS
-# keeps no registry: the combinations are held by the running process and are
-# gone the moment it stops, so there is nothing here to take back.
+# whether they went into KDE's kglobalshortcutsrc, GNOME's gsettings, or
+# nowhere at all. macOS and the desktops with no registry hold the combinations
+# in the running process, where they are gone the moment it stops, so there is
+# nothing there to take back.
 if ((MACOS)); then
   say "Nothing to unregister: macOS shortcuts live only while Dikte runs."
 elif [[ -n "$PY" ]] && "$PY" -c 'import PyQt6.QtWidgets' 2>/dev/null; then
-  for which in toggle cancel ask meeting; do
-    "$PY" "$DIR/dikte.py" shortcut remove "$which" >/dev/null 2>&1 || true
+  for which in toggle pause cancel ask meeting; do
+    "$PY" "$ENTRY" shortcut remove "$which" >/dev/null 2>&1 || true
   done
-  ok "Global shortcuts unregistered"
-  say "KWin reads that file at startup, so the keys are free after your next login."
+  case "$(PYTHONPATH="$DIR" "$PY" -c 'from dikte import hotkey; print(hotkey.backend())' 2>/dev/null)" in
+    kde)
+      ok  "Global shortcuts unregistered"
+      say "KWin reads that file at startup, so the keys are free after your next login."
+      ;;
+    gnome) ok "Global shortcuts unregistered" ;;
+    *) say "Nothing to unregister: Dikte listened for the keys itself, and they stop with it." ;;
+  esac
 else
   warn "PyQt6 is missing, so the shortcuts were left registered."
   say  "Remove them in your desktop's shortcut settings."
@@ -103,10 +114,12 @@ fi
 # 2. The running instance --------------------------------------------------
 # It holds a tray icon and a socket; asking it to quit is tidier than pulling
 # its launchers out from under it.
-if pgrep -u "$USER_NAME" -f 'dikte\.py' >/dev/null 2>&1; then
-  [[ -n "$PY" ]] && "$PY" "$DIR/dikte.py" quit >/dev/null 2>&1 || true
+# The pattern matches an instance started before Dikte became a package as well,
+# which is what an uninstall run straight after an update finds running.
+if pgrep -u "$USER_NAME" -f 'dikte(/__main__|)\.py' >/dev/null 2>&1; then
+  [[ -n "$PY" ]] && "$PY" "$ENTRY" quit >/dev/null 2>&1 || true
   sleep 0.5
-  if pgrep -u "$USER_NAME" -f 'dikte\.py' >/dev/null 2>&1; then
+  if pgrep -u "$USER_NAME" -f 'dikte(/__main__|)\.py' >/dev/null 2>&1; then
     warn "Dikte is still running; close it from the tray icon"
   else
     ok "Stopped the running instance"
@@ -148,10 +161,23 @@ fi
 if ((!MACOS)); then
   remove "$APP_DIR/dikte.desktop"
   remove "$AUTOSTART_DIR/dikte.desktop"
+  # The icon, at each of the sizes install.sh drew it. One line rather than
+  # eight, and the size directories stay: they are the theme's, not ours.
+  icons=0
+  for png in "$ICON_DIR"/hicolor/*/apps/dikte.png; do
+    [[ -e "$png" ]] || continue
+    rm -f "$png"
+    icons=$((icons + 1))
+  done
+  if ((icons)); then
+    ok "Removed the icon from $ICON_DIR/hicolor"
+  else
+    gone "Was not there: $ICON_DIR/hicolor/*/apps/dikte.png"
+  fi
   # Removing the shortcut takes its desktop file with it, but an install from
   # before this script existed may have left one behind on a desktop that never
   # used them.
-  for id in dikte-toggle dikte-cancel dikte-ask dikte-meeting; do
+  for id in dikte-toggle dikte-pause dikte-cancel dikte-ask dikte-meeting; do
     if [[ -e "$APP_DIR/$id.desktop" ]]; then
       remove "$APP_DIR/$id.desktop"
     fi
@@ -195,11 +221,11 @@ elif [[ "$CONFIG_DIR" == "$DATA_DIR" ]]; then
   # macOS keeps both in the one directory a Mac user's backup already knows
   # about, so naming it twice would only look like two things were kept.
   say "Settings and dictations kept:  $CONFIG_DIR"
-  say "Delete them too with:  ./uninstall.sh --purge"
+  say "Delete them too with:  ./scripts/uninstall.sh --purge"
 else
   say "Settings kept:     $CONFIG_DIR"
   say "Dictations kept:   $DATA_DIR"
-  say "Delete them too with:  ./uninstall.sh --purge"
+  say "Delete them too with:  ./scripts/uninstall.sh --purge"
 fi
 
 echo

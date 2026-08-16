@@ -5,9 +5,10 @@ machine by default, a model cleans it up (dropping the *uh*s, the restarts, the
 missing punctuation), and the result lands in your clipboard and is pasted into
 whatever window you were typing in.
 
-Built for KDE Plasma 6 on Wayland, and runs on GNOME X11, macOS and
-[Windows](README.windows.md) too. No dependencies beyond system packages: just
-the Python standard library, 3.11 or newer, and PyQt6.
+Built for KDE Plasma 6 on Wayland, and runs on GNOME X11, macOS,
+[Windows](README.windows.md) and any other Linux desktop that will let it read
+the keyboard. No dependencies beyond system packages: just the Python standard
+library, 3.11 or newer, and PyQt6.
 
 *[Türkçe README](README.tr.md)*
 
@@ -55,7 +56,7 @@ tools instead:
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
 
-On macOS the same `./install.sh` runs and hands over to `install-mac.sh`, which
+On macOS the same `./install.sh` runs and hands over to `scripts/install-mac.sh`, which
 puts down a `Dikte.app` in `~/Applications`, the `dikte` command and a
 LaunchAgent:
 
@@ -84,14 +85,15 @@ transcribe in the cloud. A meeting needs BlackHole or Loopback
 
 Windows works the same way, holding the keys through the system's own hotkey
 service while Dikte runs: `winget install Gyan.FFmpeg`, `pip install PyQt6`,
-then `python dikte.py`, with an optional `install.ps1` for the Start Menu entry
+then `python -m dikte`, with an optional `install.ps1` for the Start Menu entry
 and the `dikte` command. Meetings are not supported there yet; the details are
 in the [Windows README](README.windows.md).
 
 `install.sh` adds the `dikte` command, a menu entry, an autostart entry and the
-two global shortcuts, whose keys are its two arguments. `./update.sh` pulls and
-puts all of that back, keeping the keys you chose; `./uninstall.sh` takes it away
-again and leaves your settings and dictations alone unless you pass `--purge`.
+two global shortcuts, whose keys are its two arguments, or the ones already in
+your settings when it is given none. `./scripts/update.sh` pulls and puts all of
+that back; `./scripts/uninstall.sh` takes it away again and leaves your settings
+and dictations alone unless you pass `--purge`.
 
 Speech to text and cleanup each pick a provider in the settings window, and both
 run here by default, on models of your own. The cloud is the other option:
@@ -109,6 +111,7 @@ set next to it.
 | What | How |
 | --- | --- |
 | Start / stop recording | `Ctrl+Space`, or click the tray icon |
+| Pause / resume the recording | Tray menu, `dikte pause`, or a key you set |
 | Discard the recording | `Ctrl+Alt+Space`, tray menu, or `dikte cancel` |
 | Speak a command to an agent | Tray menu → *Ask Claude*, or `dikte ask` |
 | Start / end a meeting | Tray menu → *Record a meeting*, or `dikte meeting` |
@@ -189,19 +192,29 @@ running.
   right-click to delete.
 - **Turkish and English interface**, following the system locale by default.
 
-## The global shortcuts need one logout
+## The global shortcuts, and the logout KDE needs
 
 KWin only reads `kglobalshortcutsrc` at startup, so the shortcuts `install.sh`
 writes will not fire until you log out and back in. Until then, Settings →
 Shortcuts → **built-in listener** reads `/dev/input` and catches the combination
 itself. The difference: it does not swallow the key, so `Ctrl+Space` also reaches
 the focused application (some editors will pop up autocomplete). The listener
-needs your user in the `input` group: `sudo usermod -aG input $USER`.
+needs your user in the `input` group: `sudo usermod -aG input $USER`. On GNOME
+the shortcut works the moment it is installed, and on a desktop that keeps no
+registry at all (i3, XFCE, sway and most others) the listener is the whole
+mechanism: nothing is installed, nothing waits for a logout, and Settings →
+Shortcuts shows the command to bind if you would rather your desktop owned the
+keys.
 
 ## Layout
 
+Everything below is in the `dikte` package, which is what `python3 -m dikte`
+runs and what the `__main__.py` in it hands to every launcher and shortcut.
+`scripts/` holds install-mac.sh, update.sh and uninstall.sh; install.sh stays at
+the top, and `tests/` has a file per module.
+
 ```
-dikte.py          entry point, tray icon, state machine
+app.py            entry point, tray icon, state machine
 cli.py            the command line: every verb, and what it answers with
 ipc.py            one request and one reply over the local socket
 audio.py          PCM capture: pw-record for dictation, ffmpeg for a meeting
@@ -216,14 +229,14 @@ vad.py            deciding whether a recording holds speech at all
 filetranscribe.py file transcription: ffmpeg, chunking, timestamps
 overlay.py        the corner indicator
 settings_ui.py    settings window
-hotkey.py         KDE shortcut installation, the evdev listener, Carbon on a Mac
+hotkey.py         the desktop's shortcut registry, the evdev listener, Carbon on a Mac
 paste.py          wl-clipboard and ydotool wrappers, pbcopy and CoreGraphics
 trayicon.py       the tray icons, drawn where there is no icon theme
 i18n.py           the string table
 ```
 
 The indicator is drawn through XWayland, because a Wayland client cannot place a
-window in a screen corner; `dikte.py` sets `QT_QPA_PLATFORM=xcb` for that.
+window in a screen corner; `app.py` sets `QT_QPA_PLATFORM=xcb` for that.
 
 ## License
 

@@ -2,7 +2,10 @@
 # Dikte updater: pull, put the launchers back, restart what was running.
 set -euo pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The checkout, one level up: this script lives in scripts/, everything it
+# touches is at the top of the tree.
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENTRY="$DIR/dikte/__main__.py"
 USER_NAME="$(id -un)"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -13,23 +16,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   # make a missing file the end of the script rather than a question answered no.
   PY="$(sed -n 's/^exec "\([^"]*\)".*/\1/p' "$HOME/.local/bin/dikte" 2>/dev/null | head -1 || true)"
   [[ -x "$PY" ]] || PY="$(command -v python3 || true)"
-  DEFAULT_SHORTCUT="Ctrl+Option+Space"
 else
   PY="$(command -v python3 || true)"
-  DEFAULT_SHORTCUT="Ctrl+Space"
 fi
 
 say()  { printf '  %s\n' "$1"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
 die()  { printf '  \033[31m✗\033[0m %s\n' "$1"; echo; exit 1; }
-
-# The combination stored in the settings, which is where Dikte itself reads it
-# from and the one place that is the same on KDE and on GNOME.
-setting() {
-  [[ -n "$PY" ]] || return 0
-  "$PY" "$DIR/dikte.py" config get "$1" 2>/dev/null || true
-}
 
 echo
 echo "Updating Dikte"
@@ -90,18 +84,15 @@ echo
 
 # 4. Launchers --------------------------------------------------------------
 # An update can add a dependency or move a file, so the installer runs again.
-# It would otherwise register its own defaults over the keys you chose, so it
-# is told what those are. Read before the installer runs, since it is the one
-# writing them.
-shortcut="$(setting shortcut)"
-cancel_shortcut="$(setting cancel_shortcut)"
-# Positional, so a chosen discard key cannot be passed without the other one.
-"$DIR/install.sh" "${shortcut:-$DEFAULT_SHORTCUT}" "${cancel_shortcut:-}"
+# With no keys named it keeps the ones stored in the settings, which are the
+# ones you chose.
+"$DIR/install.sh"
 
 # 5. The running instance ---------------------------------------------------
-# It is still running the code from before the pull.
-if pgrep -u "$USER_NAME" -f 'dikte\.py' >/dev/null 2>&1; then
-  if [[ -n "$PY" ]] && "$PY" "$DIR/dikte.py" restart >/dev/null 2>&1; then
+# It is still running the code from before the pull, which on an update across
+# the move into a package is a process still named after the old entry point.
+if pgrep -u "$USER_NAME" -f 'dikte(/__main__|)\.py' >/dev/null 2>&1; then
+  if [[ -n "$PY" ]] && "$PY" "$ENTRY" restart >/dev/null 2>&1; then
     ok "Restarted, so the new version is the one running"
   else
     warn "Could not restart it; use the tray menu → Restart"

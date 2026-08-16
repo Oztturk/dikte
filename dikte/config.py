@@ -6,12 +6,12 @@ import json
 import os
 import sys
 
-import api
-import ggml
-import i18n
-import paste
-import paths
-from i18n import t
+from . import api
+from . import ggml
+from . import i18n
+from . import paste
+from . import paths
+from .i18n import t
 
 
 _MACOS = sys.platform == "darwin"
@@ -435,6 +435,10 @@ DEFAULTS = {
     # trick lands on the toggle, Alt and Option being one key, so discarding
     # gets a letter instead.
     "cancel_shortcut": "Ctrl+Option+D" if _MACOS else "Ctrl+Alt+Space",
+    # Empty -> tray only. Holding a recording is not something a keyboard has a
+    # habit for, and a combination nobody asked for is one taken away from
+    # whatever else was using it.
+    "pause_shortcut": "",
     "evdev_hotkey": False,
     "overlay_corner": "bottom-left",
     "keep_audio": False,

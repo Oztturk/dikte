@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 
-from i18n import t
+from .i18n import t
 
 # Linux input event codes (linux/input-event-codes.h), which is what ydotool
 # takes. They are also the list of keys a paste shortcut may be built from, so

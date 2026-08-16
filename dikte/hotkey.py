@@ -1,11 +1,16 @@
 """Global shortcuts: the desktop's own registry, plus a listener of our own.
 
 Two things have to happen for a key combination to reach Dikte. Somewhere has
-to be told about it, and something has to be listening. On Linux that is the
-desktop's shortcut registry (KDE's file, GNOME's gsettings) and a reader of
-/dev/input for the wait until the registry is live. macOS has no registry to
-write into: the application asks Carbon for the combination while it runs, so
-there the listener is not a fallback but the whole mechanism.
+to be told about it, and something has to be listening. Two desktops keep a
+registry we can write into and read back, and something outside Dikte acts on
+it: KDE has a file, GNOME has gsettings. There the /dev/input listener only
+covers the wait until the registry is live.
+
+Everywhere else there is nothing to write into, so Dikte holds the combination
+itself for as long as it runs: macOS asks Carbon for it, and every other Linux
+session (i3, XFCE, Cinnamon, sway, whatever the session calls itself) leans on
+the /dev/input listener. That is not a fallback there, it is the mechanism, so
+nothing about installing or removing a registry entry should be offered.
 """
 
 import ast
@@ -25,10 +30,11 @@ import threading
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from i18n import t
+from .i18n import t
 
 DESKTOP_ID = "dikte-toggle.desktop"
 CANCEL_DESKTOP_ID = "dikte-cancel.desktop"
+PAUSE_DESKTOP_ID = "dikte-pause.desktop"
 MEETING_DESKTOP_ID = "dikte-meeting.desktop"
 ASK_DESKTOP_ID = "dikte-ask.desktop"
 APPLICATIONS_DIR = pathlib.Path.home() / ".local/share/applications"
@@ -39,7 +45,7 @@ GNOME_BINDING_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys.custom-keyb
 
 Shortcut = collections.namedtuple("Shortcut", "verb desktop_id name setting fallback")
 
-# Every global shortcut in one place, because there are four of them and the
+# Every global shortcut in one place, because there are five of them and the
 # command line, the settings window and the installer each used to carry their
 # own copy of the list. `fallback` is what to register when the setting is
 # empty: only the toggle has one, since it is the key the application is
@@ -47,6 +53,8 @@ Shortcut = collections.namedtuple("Shortcut", "verb desktop_id name setting fall
 SHORTCUTS = {
     "toggle": Shortcut("toggle", DESKTOP_ID, "Dikte: start/stop recording",
                        "shortcut", "Ctrl+Space"),
+    "pause": Shortcut("pause", PAUSE_DESKTOP_ID,
+                      "Dikte: pause/resume the recording", "pause_shortcut", ""),
     "cancel": Shortcut("cancel", CANCEL_DESKTOP_ID, "Dikte: discard the recording",
                        "cancel_shortcut", ""),
     "ask": Shortcut("ask", ASK_DESKTOP_ID, "Dikte: ask Claude Code",
@@ -102,13 +110,23 @@ def parse_shortcut(text):
     return mods, key
 
 
+# What the running listener holds. Where there is no registry this is the whole
+# of "installed", and it lasts as long as the process does: there is no file,
+# and no other program to read one. Written by the listener that is in use,
+# read by the status line, so what Settings shows is what is actually being
+# listened for.
+_REGISTERED = {}
+
+
 # --- built-in listener ----------------------------------------------------
 
 class EvdevHotkey(QObject):
     """Catches global shortcuts by reading /dev/input directly.
 
     It does not swallow the key; the focused application sees the combination
-    too. This is the fallback that works before the KDE shortcut goes live.
+    too. On KDE that is the price of not waiting for the next login, and the
+    registry takes over once it is live. On a desktop with no registry at all
+    it is the only way the keys arrive, and the price is permanent.
     """
 
     triggered = pyqtSignal(str)   # the name the binding was registered under
@@ -151,6 +169,10 @@ class EvdevHotkey(QObject):
             ))
             return False
         self._bindings = parsed
+        for name, shortcut in bindings.items():
+            spec = SHORTCUTS.get(name)
+            if spec and shortcut:
+                _REGISTERED[spec.desktop_id] = shortcut
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, args=(devices,), daemon=True)
         self._thread.start()
@@ -161,6 +183,7 @@ class EvdevHotkey(QObject):
         if self._thread:
             self._thread.join(timeout=1.5)
         self._thread = None
+        _REGISTERED.clear()
 
     def _open_devices(self):
         fds = []
@@ -242,12 +265,6 @@ KEYBOARD_EVENT_CLASS = "keyb"
 HOTKEY_PRESSED = 5                 # kEventHotKeyPressed
 PARAMETER_ANY = "----"             # kEventParamDirectObject / typeWildCard
 HOTKEY_ID_PARAMETER = "hkid"
-
-# What the running listener holds. This is the whole of "installed" on macOS,
-# and it lasts as long as the process does: there is no file, and no other
-# program to read one. Written by CarbonHotkey.start(), read by the status
-# line, so what Settings shows is what the Mac actually gave us.
-_REGISTERED = {}
 
 
 def parse_macos_shortcut(text):
@@ -584,6 +601,17 @@ class WinHotkey(QObject):
 
 # --- the desktop's own shortcut -------------------------------------------
 
+# The five ways a combination can reach Dikte. Everything below asks backend()
+# rather than looking at the session itself, so the name shown, the status read
+# back, what Install writes and what the installer promises cannot disagree
+# about which one this session got.
+KDE = "kde"
+GNOME = "gnome"
+MACOS = "macos"
+WINDOWS = "windows"
+LISTENER = "listener"
+
+
 def _macos():
     return sys.platform == "darwin"
 
@@ -592,9 +620,27 @@ def _windows():
     return sys.platform == "win32"
 
 
-def _gnome():
-    desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
-    return "gnome" in desktop and shutil.which("gsettings") is not None
+def backend():
+    """Which shortcut mechanism this session has.
+
+    A desktop only counts when the program that writes its registry is
+    installed too: a GNOME session without gsettings, or a Plasma one without
+    kwriteconfig6, has nothing we can register into. Anything unrecognised is
+    the listener's, which is every other Linux desktop and needs nothing from
+    the session at all.
+    """
+    if _macos():
+        return MACOS
+    if _windows():
+        return WINDOWS
+    names = os.environ.get("XDG_CURRENT_DESKTOP", "").lower().split(":")
+    names = [name.strip() for name in names if name.strip()]
+    if any("gnome" in name for name in names) and shutil.which("gsettings"):
+        return GNOME
+    if (any("kde" in name or "plasma" in name for name in names)
+            and shutil.which("kwriteconfig6")):
+        return KDE
+    return LISTENER
 
 
 def _gnome_path(desktop_id):
@@ -748,57 +794,80 @@ def installs_shortcuts():
     """Whether this system keeps a shortcut registry to write into.
 
     KDE and GNOME do, and something outside Dikte reads it, so the combination
-    survives Dikte being closed. macOS and Windows do not: there is nothing to
-    install, nothing to remove, and Settings should not offer either.
+    survives Dikte being closed. macOS, Windows and the plain listener do not:
+    there is nothing to install, nothing to remove, and Settings should not
+    offer either.
     """
-    return not _macos() and not _windows()
+    return backend() in (KDE, GNOME)
 
 
 def shortcut_needs_restart():
     """Whether an installed shortcut waits for the next login before it works.
 
     KWin reads kglobalshortcutsrc once, when it starts. GNOME picks a binding
-    up as it is written, and macOS and Windows never had one to write.
+    up as it is written, and the others never had one to write.
     """
-    return not _macos() and not _windows() and not _gnome()
+    return backend() == KDE
 
 
 def install_shortcut(shortcut, exec_command, name="Dikte: start/stop recording",
                      desktop_id=DESKTOP_ID):
-    if _macos() or _windows():
-        _REGISTERED[desktop_id] = shortcut
+    which = backend()
+    if which == GNOME:
+        return install_gnome_shortcut(shortcut, exec_command, name, desktop_id)
+    if which == KDE:
+        return install_kde_shortcut(shortcut, exec_command, name, desktop_id)
+    _REGISTERED[desktop_id] = shortcut
+    if which in (MACOS, WINDOWS):
         return True, t(
             "Shortcut saved: {shortcut}\nDikte holds this one itself while it "
             "is running, so it works as soon as the settings are saved.",
             shortcut=shortcut,
         )
-    if _gnome():
-        return install_gnome_shortcut(shortcut, exec_command, name, desktop_id)
-    return install_kde_shortcut(shortcut, exec_command, name, desktop_id)
+    return True, t(
+        "Shortcut saved: {shortcut}\n{desktop} has no shortcut registry to "
+        "install into, so Dikte listens for this one itself while it is "
+        "running. It works as soon as the settings are saved.",
+        shortcut=shortcut, desktop=desktop_name(),
+    )
 
 
 def remove_shortcut(desktop_id=DESKTOP_ID):
-    if _macos() or _windows():
-        _REGISTERED.pop(desktop_id, None)
-    elif _gnome():
+    which = backend()
+    if which == GNOME:
         remove_gnome_shortcut(desktop_id)
-    else:
+    elif which == KDE:
         remove_kde_shortcut(desktop_id)
+    else:
+        _REGISTERED.pop(desktop_id, None)
 
 
 def shortcut_status(desktop_id=DESKTOP_ID):
-    if _macos() or _windows():
-        return _REGISTERED.get(desktop_id)
-    return (gnome_shortcut_status(desktop_id) if _gnome()
-            else kde_shortcut_status(desktop_id))
+    which = backend()
+    if which == GNOME:
+        return gnome_shortcut_status(desktop_id)
+    if which == KDE:
+        return kde_shortcut_status(desktop_id)
+    return _REGISTERED.get(desktop_id)
 
 
 def desktop_name():
-    if _macos():
+    """What to call this session in the interface.
+
+    The listener's desktops get the name the session gave itself, so an i3 user
+    is told about i3 rather than about a KDE that is not running.
+    """
+    which = backend()
+    if which == MACOS:
         return "macOS"
-    if _windows():
+    if which == WINDOWS:
         return "Windows"
-    return "GNOME" if _gnome() else "KDE"
+    if which == GNOME:
+        return "GNOME"
+    if which == KDE:
+        return "KDE"
+    name = os.environ.get("XDG_CURRENT_DESKTOP", "").split(":")[0].strip()
+    return name or "This desktop"
 
 
 # --- KDE ------------------------------------------------------------------
@@ -882,9 +951,12 @@ def kde_shortcut_status(desktop_id=DESKTOP_ID):
 
 def conflicting_shortcuts(shortcut, desktop_id=DESKTOP_ID):
     """Names of other KDE entries bound to the same combination."""
-    if _macos() or _windows():
-        # There is no list to read: both answer the question by refusing the
-        # registration, which their listeners report when they ask for the key.
+    if backend() != KDE:
+        # Nowhere else has a list to read. macOS and Windows answer the question
+        # by refusing the registration, which their listeners report when they
+        # ask for the key; the other two would only be reading a file their
+        # session never looks at, and a leftover one from a Plasma install the
+        # user has since left would refuse perfectly good combinations.
         return []
     try:
         text = SHORTCUTS_FILE.read_text(encoding="utf-8")

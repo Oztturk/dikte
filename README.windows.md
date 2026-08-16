@@ -23,7 +23,7 @@ all of it and leaves the repository and your settings alone.
 To try it without installing anything:
 
 ```sh
-python dikte.py
+python -m dikte
 ```
 
 ## First run

@@ -26,6 +26,9 @@ WARN = QColor(240, 180, 80)
 THEM = QColor(110, 190, 255)   # the other side of a meeting
 
 ASK = QColor(150, 140, 255)    # recording a command rather than a dictation
+# Recording, but nothing is going in. The same amber a warning gets, and for
+# the same reason: it is the colour that stops you walking away from it.
+HELD = WARN
 
 STATE_COLORS = {"recording": REC, "asking": ASK, "meeting": REC, "busy": BUSY,
                 "done": OK, "warning": WARN, "error": ERR}
@@ -47,6 +50,10 @@ class Overlay(QWidget):
         self.dismissable = dismissable
         self.muted = False
         self._stacked = False
+        # A pause is not a state of its own: what is on screen is still the
+        # recording, held. Keeping it beside the state is what lets the ribbon
+        # stay where the pause found it instead of being cleared and rebuilt.
+        self.paused = False
         self.state = "idle"
         self.message = ""
         self.levels = [0.0] * BARS
@@ -103,6 +110,7 @@ class Overlay(QWidget):
         self.message = ""
         self.seconds = 0.0
         self.levels = [0.0] * BARS
+        self.paused = False
         self.muted = False   # a new run starts visible, whatever the last one did
         self._hide_timer.stop()
         self._appear()
@@ -114,6 +122,7 @@ class Overlay(QWidget):
         self.seconds = 0.0
         self.levels = [0.0] * BARS
         self.levels2 = [0.0] * BARS
+        self.paused = False
         self._hide_timer.stop()
         self._appear()
 
@@ -174,6 +183,17 @@ class Overlay(QWidget):
 
     def set_seconds(self, seconds):
         self.seconds = seconds
+
+    def set_paused(self, paused):
+        """Held, or taking sound in again.
+
+        Everything about the ribbon says a recording is running: a dot that
+        pulses, bars that move, a clock that counts. A pause that only stopped
+        the sound would leave all three saying the words are still going in, so
+        it is the ribbon that has to say otherwise.
+        """
+        self.paused = bool(paused)
+        self.update()
 
     # ---- internals -----------------------------------------------------
 
@@ -244,11 +264,11 @@ class Overlay(QWidget):
         # the corner when it does rather than leaving a gap where it was.
         if self.below is not None and self.below.showing != self._stacked:
             self._reposition()
-        if self.state in LIVE:
+        if self.state in LIVE and not self.paused:
             # keep the ribbon moving even through a pause in speech
             self.levels = self.levels[1:] + [self.levels[-1] * 0.72]
-        if self.state == "meeting":
-            self.levels2 = self.levels2[1:] + [self.levels2[-1] * 0.72]
+            if self.state == "meeting":
+                self.levels2 = self.levels2[1:] + [self.levels2[-1] * 0.72]
         self.update()
 
     def _label_font(self):
@@ -273,6 +293,8 @@ class Overlay(QWidget):
         painter.drawPath(path)
 
         accent = STATE_COLORS.get(self.state, MUTED)
+        if self._held:
+            accent = HELD
         self._draw_indicator(painter, accent)
 
         if self.state in LIVE:
@@ -283,10 +305,23 @@ class Overlay(QWidget):
             if self._can_dismiss:
                 self._draw_dismiss(painter)
 
+    @property
+    def _held(self):
+        """A recording that is paused. Nothing else can be."""
+        return self.paused and self.state in LIVE
+
     def _draw_indicator(self, painter, accent):
         cx, cy = 26.0, self.height() / 2
         painter.setPen(Qt.PenStyle.NoPen)
-        if self.state in LIVE:
+        if self._held:
+            # The two bars everything that plays sound uses, and no glow: a
+            # pulse is what says a recording is live.
+            painter.setBrush(accent)
+            for offset in (-4.4, 1.4):
+                painter.drawRoundedRect(
+                    QRectF(cx + offset, cy - 6.5, 3.0, 13.0), 1.2, 1.2
+                )
+        elif self.state in LIVE:
             pulse = 0.62 + 0.38 * (0.5 + 0.5 * math.sin(self._phase * 1.6))
             glow = QColor(accent)
             glow.setAlphaF(0.22 * pulse)

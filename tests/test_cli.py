@@ -12,10 +12,10 @@ import json
 import unittest
 from unittest import mock
 
-import cli
-import config as cfg
-import hotkey
-import ipc
+from dikte import cli
+from dikte import config as cfg
+from dikte import hotkey
+from dikte import ipc
 from tests.support import DikteTest, fake_urlopen
 
 

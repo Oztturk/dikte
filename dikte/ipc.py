@@ -22,8 +22,13 @@ CONNECT_MS = 800
 
 
 def script_path():
+    """The package entry point, as a path.
+
+    A shortcut and a relaunch both start a second process, and neither has a
+    working directory to run `-m dikte` from, so the file is named outright.
+    """
     return os.path.realpath(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "dikte.py")
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "__main__.py")
     )
 
 

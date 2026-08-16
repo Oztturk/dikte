@@ -2,7 +2,7 @@
 
 import unittest
 
-import vad
+from dikte import vad
 from tests.support import DikteTest
 
 CHUNK = 1024 / 16000  # what worker.py feeds it: one chunk of the level meter

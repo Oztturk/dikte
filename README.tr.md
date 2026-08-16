@@ -55,7 +55,7 @@ araçlarıyla çalışır:
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
 
-macOS'ta da aynı `./install.sh` çalışır, işi `install-mac.sh`'a devreder;
+macOS'ta da aynı `./install.sh` çalışır, işi `scripts/install-mac.sh`'a devreder;
 `~/Applications` içine bir `Dikte.app`, `dikte` komutunu ve bir LaunchAgent
 kurar:
 
@@ -83,10 +83,10 @@ BlackHole veya Loopback gerekiyor (`brew install blackhole-2ch`); dikte için
 gerekmiyor.
 
 `install.sh` `dikte` komutunu, menü girdisini, oturum açılışında otomatik
-başlatmayı ve iki global kısayolu kurar; tuşları da iki argümanı. `./update.sh`
-son sürümü çeker ve bunları senin seçtiğin tuşlarla yerine koyar;
-`./uninstall.sh` hepsini geri alır, `--purge` demedikçe ayarlarına ve
-diktelerine dokunmaz.
+başlatmayı ve iki global kısayolu kurar; tuşları iki argümanı, argüman
+verilmezse ayarlarında duranlar. `./scripts/update.sh` son sürümü çeker ve
+bunları yerine koyar; `./scripts/uninstall.sh` hepsini geri alır, `--purge`
+demedikçe ayarlarına ve diktelerine dokunmaz.
 
 Sesi yazıya çevirme ve temizleme, ayarlar penceresinde ayrı ayrı sağlayıcı
 seçer; ikisi de varsayılan olarak burada, kendi modellerinle çalışır. Bulutu
@@ -198,8 +198,13 @@ Kısayollar sekmesi bağlanacak komutu gösterir.
 
 ## Dosyalar
 
+Aşağıdakilerin hepsi `dikte` paketinin içinde: `python3 -m dikte` bunu çalıştırır,
+içindeki `__main__.py` de her başlatıcının ve kısayolun adlandırdığı dosyadır.
+`scripts/` altında install-mac.sh, update.sh ve uninstall.sh var; install.sh en
+üstte kalır, `tests/` içinde de her modülün bir dosyası.
+
 ```
-dikte.py          giriş noktası, tepsi simgesi, durum makinesi
+app.py            giriş noktası, tepsi simgesi, durum makinesi
 cli.py            komut satırı: bütün fiiller ve verdikleri cevap
 ipc.py            yerel sokette bir istek, bir cevap
 audio.py          PCM kaydı: diktede pw-record, toplantıda ffmpeg
@@ -221,7 +226,7 @@ i18n.py           metin tablosu
 ```
 
 Gösterge XWayland üzerinden çizilir; Wayland'da bir pencereyi belirli bir köşeye
-yerleştirmenin yolu yok, `dikte.py` bu yüzden `QT_QPA_PLATFORM=xcb` ayarlar.
+yerleştirmenin yolu yok, `app.py` bu yüzden `QT_QPA_PLATFORM=xcb` ayarlar.
 
 ## Lisans
 

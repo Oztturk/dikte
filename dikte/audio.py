@@ -31,7 +31,7 @@ import wave
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from i18n import t
+from .i18n import t
 
 RATE = 16000
 CHANNELS = 1

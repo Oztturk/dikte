@@ -24,13 +24,13 @@ import wave
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-import api
-import cleanup
-import config as cfg
-import filetranscribe
-import vad
-from filetranscribe import Cancelled, format_timestamp
-from i18n import t
+from . import api
+from . import cleanup
+from . import config as cfg
+from . import filetranscribe
+from . import vad
+from .filetranscribe import Cancelled, format_timestamp
+from .i18n import t
 
 # Where the document stops being prose and starts being the transcript. It is a
 # comment, so it never shows up in a rendered document, and it is what a retry

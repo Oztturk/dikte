@@ -11,11 +11,11 @@ import os
 import unittest
 from unittest import mock
 
-import api
-import assistant
-import config as cfg
-import paste
-import worker
+from dikte import api
+from dikte import assistant
+from dikte import config as cfg
+from dikte import paste
+from dikte import worker
 from tests.support import DikteTest, make_wav, speech
 
 

@@ -17,8 +17,8 @@ import threading
 import time
 from unittest import mock
 
-import ggml
-import hub
+from dikte import ggml
+from dikte import hub
 from tests.support import (DikteTest, fake_urlopen, http_error, json_body,
                            linux_only, url_error)
 

@@ -15,15 +15,15 @@ import traceback
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-import api
-import assistant
-import audio
-import cleanup
-import config as cfg
-import i18n
-import paste
-import vad
-from i18n import t
+from . import api
+from . import assistant
+from . import audio
+from . import cleanup
+from . import config as cfg
+from . import i18n
+from . import paste
+from . import vad
+from .i18n import t
 
 CHUNK_SECONDS = audio.CHUNK_FRAMES / audio.RATE
 

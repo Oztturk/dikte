@@ -15,7 +15,7 @@ from unittest import mock
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QApplication
 
-import trayicon
+from dikte import trayicon
 from tests.support import DikteTest
 
 # One application for the whole run; Qt allows no second one.
@@ -66,7 +66,7 @@ class Tray(DikteTest):
         self.patch_attr(trayicon, "_cache", {})
 
     def test_a_name_we_do_not_draw_is_a_null_icon(self):
-        # dikte.py asks the theme first and falls through to here, so anything
+        # app.py asks the theme first and falls through to here, so anything
         # answered with a picture would be one the theme should have given.
         self.assertTrue(trayicon.icon("emblem-important").isNull())
 

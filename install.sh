@@ -9,18 +9,35 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # path. That is a second script rather than a branch through this one, and
 # update.sh reaches it through here without having to know which it is on.
 if [[ "$(uname -s)" == "Darwin" ]]; then
-  exec "$DIR/install-mac.sh" "$@"
+  exec "$DIR/scripts/install-mac.sh" "$@"
 fi
 
 PY="$(command -v python3)"
+# The one file that starts the application, whoever is asking: the launcher
+# below, both .desktop files, and every shortcut Dikte registers.
+ENTRY="$DIR/dikte/__main__.py"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 AUTOSTART_DIR="$HOME/.config/autostart"
 ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
-SHORTCUT="${1:-Ctrl+Space}"
-# Without the colon, so that a second argument given as "" stays empty. That is
-# how update.sh says "this one was turned off", as against not saying anything.
-CANCEL_SHORTCUT="${2-Ctrl+Alt+Space}"
+# Only the one: the discard key's default is the settings' own, read back below.
+DEFAULT_SHORTCUT="Ctrl+Space"
+# Given as arguments, or asked of the settings further down. An installer run
+# again, which is what every update does, must not undo a key you chose in
+# Settings, so silence here means "keep whatever is there".
+SHORTCUT="${1:-}"
+CANCEL_SHORTCUT="${2-}"
+# Passed as "" means the discard key is off, which is not the same answer as
+# not being passed at all.
+CANCEL_GIVEN=$(( $# >= 2 ))
+# One caller says both without meaning either: an updater from before Dikte
+# became a package looks for the settings at a path that no longer exists, and
+# so passes the default key and an empty discard key rather than yours. This
+# can go once nobody is updating across that commit any more.
+if [[ "$SHORTCUT" == "$DEFAULT_SHORTCUT" && $CANCEL_GIVEN == 1 && -z "$CANCEL_SHORTCUT" ]]; then
+  SHORTCUT=""
+  CANCEL_GIVEN=0
+fi
 
 say()  { printf '  %s\n' "$1"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -83,8 +100,8 @@ fi
 
 # 3. Launchers -------------------------------------------------------------
 mkdir -p "$BIN_DIR" "$APP_DIR" "$AUTOSTART_DIR" "$ICON_DIR"
-ln -sf "$DIR/dikte.py" "$BIN_DIR/dikte"
-chmod +x "$DIR/dikte.py"
+ln -sf "$ENTRY" "$BIN_DIR/dikte"
+chmod +x "$ENTRY"
 ok "Command installed: $BIN_DIR/dikte"
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
@@ -97,7 +114,7 @@ esac
 # bare X11 login Qt is left with hicolor, which has no such name, and the entry
 # comes out blank. hicolor is also where this goes, since it is the theme every
 # desktop must fall back to.
-if "$PY" "$DIR/trayicon.py" --hicolor "$ICON_DIR" >/dev/null 2>&1; then
+if PYTHONPATH="$DIR" "$PY" -m dikte.trayicon --hicolor "$ICON_DIR" >/dev/null 2>&1; then
   ICON=dikte
   # Only GTK reads a cache, and only if one is already there; a stale cache
   # would otherwise hide the file we just wrote.
@@ -116,7 +133,7 @@ cat > "$APP_DIR/dikte.desktop" <<EOF
 Type=Application
 Name=Dikte
 Comment=Voice dictation: record, transcribe, clean up, paste
-Exec=$PY $DIR/dikte.py
+Exec=$PY $ENTRY
 Icon=$ICON
 Categories=Utility;AudioVideo;
 StartupNotify=false
@@ -127,7 +144,7 @@ cat > "$AUTOSTART_DIR/dikte.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Dikte
-Exec=$PY $DIR/dikte.py
+Exec=$PY $ENTRY
 Icon=$ICON
 X-GNOME-Autostart-enabled=true
 StartupNotify=false
@@ -143,14 +160,26 @@ ok "Will start automatically on login"
 # knows which desktop it is on, and it stores the combination in the settings
 # as well, which is where the built-in listener reads it from. A key written
 # to only one of the two places is a key that half works.
-if [[ "$SHORTCUT" == "$CANCEL_SHORTCUT" ]]; then
-  warn "Both arguments are $SHORTCUT, so the discard key was left out."
+# What was not asked for is read back out of the settings, which is where Dikte
+# keeps the keys and so what a second run of this script has to leave alone.
+stored() { PYTHONPATH="$DIR" "$PY" -m dikte config get "$1" 2>/dev/null || true; }
+if [[ -z "$SHORTCUT" ]]; then
+  SHORTCUT="$(stored shortcut)"
+  SHORTCUT="${SHORTCUT:-$DEFAULT_SHORTCUT}"
+fi
+if [[ $CANCEL_GIVEN == 0 ]]; then
+  # An empty answer here is a discard key that was turned off, and it stays off.
+  CANCEL_SHORTCUT="$(stored cancel_shortcut)"
+fi
+
+if [[ -n "$CANCEL_SHORTCUT" && "$SHORTCUT" == "$CANCEL_SHORTCUT" ]]; then
+  warn "Both keys are $SHORTCUT, so the discard key was left out."
   say  "Pass two different combinations, or set it in Settings → Shortcuts."
   CANCEL_SHORTCUT=""
 fi
 
 register() {   # which  combination  label
-  if out="$("$PY" "$DIR/dikte.py" shortcut install "$1" --combo "$2" 2>&1)"; then
+  if out="$("$PY" "$ENTRY" shortcut install "$1" --combo "$2" 2>&1)"; then
     ok "$3: $2"
   else
     # One line: the rest of what it has to say about KWin is printed below.
@@ -167,7 +196,7 @@ if python3 -c 'import PyQt6.QtWidgets' 2>/dev/null; then
   # not this script's. Guessing from XDG_CURRENT_DESKTOP here is how every
   # session that was neither GNOME nor KDE used to be promised a KWin that was
   # never running.
-  case "$("$PY" -c 'import sys; sys.path.insert(0, sys.argv[1]); import hotkey; print(hotkey.backend())' "$DIR" 2>/dev/null)" in
+  case "$(PYTHONPATH="$DIR" "$PY" -c 'from dikte import hotkey; print(hotkey.backend())' 2>/dev/null)" in
     kde)
       warn "KWin only reads these at startup, so they go live after your next"
       say  "login. Until then open Settings → Shortcuts and turn on the"

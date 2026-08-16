@@ -56,7 +56,7 @@ tools instead:
 sudo apt install pulseaudio-utils xclip xdotool ffmpeg
 ```
 
-On macOS the same `./install.sh` runs and hands over to `install-mac.sh`, which
+On macOS the same `./install.sh` runs and hands over to `scripts/install-mac.sh`, which
 puts down a `Dikte.app` in `~/Applications`, the `dikte` command and a
 LaunchAgent:
 
@@ -84,9 +84,10 @@ transcribe in the cloud. A meeting needs BlackHole or Loopback
 (`brew install blackhole-2ch`); dictation does not.
 
 `install.sh` adds the `dikte` command, a menu entry, an autostart entry and the
-two global shortcuts, whose keys are its two arguments. `./update.sh` pulls and
-puts all of that back, keeping the keys you chose; `./uninstall.sh` takes it away
-again and leaves your settings and dictations alone unless you pass `--purge`.
+two global shortcuts, whose keys are its two arguments, or the ones already in
+your settings when it is given none. `./scripts/update.sh` pulls and puts all of
+that back; `./scripts/uninstall.sh` takes it away again and leaves your settings
+and dictations alone unless you pass `--purge`.
 
 Speech to text and cleanup each pick a provider in the settings window, and both
 run here by default, on models of your own. The cloud is the other option:
@@ -201,8 +202,13 @@ keys.
 
 ## Layout
 
+Everything below is in the `dikte` package, which is what `python3 -m dikte`
+runs and what the `__main__.py` in it hands to every launcher and shortcut.
+`scripts/` holds install-mac.sh, update.sh and uninstall.sh; install.sh stays at
+the top, and `tests/` has a file per module.
+
 ```
-dikte.py          entry point, tray icon, state machine
+app.py            entry point, tray icon, state machine
 cli.py            the command line: every verb, and what it answers with
 ipc.py            one request and one reply over the local socket
 audio.py          PCM capture: pw-record for dictation, ffmpeg for a meeting
@@ -224,7 +230,7 @@ i18n.py           the string table
 ```
 
 The indicator is drawn through XWayland, because a Wayland client cannot place a
-window in a screen corner; `dikte.py` sets `QT_QPA_PLATFORM=xcb` for that.
+window in a screen corner; `app.py` sets `QT_QPA_PLATFORM=xcb` for that.
 
 ## License
 

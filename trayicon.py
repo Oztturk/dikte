@@ -1,16 +1,25 @@
 """The four tray icons, drawn here for systems that have no icon theme.
 
-Linux hands out `audio-input-microphone`, `media-record`, `view-refresh` and
-`media-playback-pause` from whatever icon theme is installed, and Qt finds them
-through QIcon.fromTheme. macOS has no such registry: fromTheme returns a null
-icon there, and a null icon in the menu bar is an item you cannot see, which is
-the whole of Dikte's interface gone. So the same four shapes are drawn here,
-and used whenever the theme has nothing to offer.
+A desktop hands out `audio-input-microphone`, `media-record`, `view-refresh`
+and `media-playback-pause` from whatever icon theme is installed, and Qt finds
+them through QIcon.fromTheme. Two systems have nothing to hand out. macOS keeps
+no such registry at all. And a Linux session that names no desktop, which is
+what i3 and a bare X11 login are, leaves Qt with `hicolor` as its only theme,
+where none of those four names exist. On both, fromTheme returns a null icon,
+and a null icon in a tray is an item you cannot see, which is the whole of
+Dikte's interface gone. So the same four shapes are drawn here, and used
+whenever the theme has nothing to offer.
 
-They are drawn as template images: one colour, transparent everywhere else,
+On macOS they are template images: one colour, transparent everywhere else,
 with isMask set. That is what lets macOS invert them for a dark menu bar and
 grey them while the menu is open, and it is why the shapes are outlines rather
 than the coloured glyphs a Linux theme would give.
+
+X11 has no such contract. A tray there is given a picture, paints it over
+whatever colour the bar happens to be, and never says what that colour is, so
+black ink on i3's black bar is an empty slot rather than an icon. The same
+shapes are drawn there in white over a dark copy of themselves spread a pixel
+outwards, which stands out on a dark bar and stays readable on a light one.
 """
 
 import pathlib
@@ -23,10 +32,11 @@ from PyQt6.QtGui import (QColor, QIcon, QLinearGradient, QPainter, QPainterPath,
 # What a Mac menu bar asks for: 22 points, at 1x and at 2x. Both are put in the
 # icon rather than one being scaled, because a scaled stroke goes soft.
 SIZES = (22, 44)
-# Drawn in black; the mask throws the colour away and keeps the coverage, and
-# on a system that does not do masks black is still the right ink for a light
-# panel and readable on a dark one.
-INK = QColor(0, 0, 0)
+# The two inks. macOS is handed the dark one and throws the colour away, keeping
+# only the coverage; everywhere else the light one is the glyph and the dark one
+# is the outline behind it.
+DARK = QColor(0, 0, 0)
+LIGHT = QColor(255, 255, 255)
 
 
 def _canvas(size):
@@ -37,11 +47,13 @@ def _canvas(size):
     return pixmap, painter
 
 
-def _paint_microphone(painter, size, ink):
+def _microphone(painter, size, ink):
     """A capsule on a stand: idle, and the application's own mark.
 
-    The colour is a parameter because the same glyph is the tray stencil, where
-    it is black and then masked, and the white one on the application icon.
+    Every shape below takes its colour rather than reaching for a constant: the
+    same glyph is drawn dark for the macOS mask, white for the tray on X11, dark
+    again a pixel out for the outline under it, and white on the blue tile of
+    the application icon.
     """
     unit = size / 22.0
     pen = QPen(ink, 1.6 * unit)
@@ -63,23 +75,19 @@ def _paint_microphone(painter, size, ink):
     painter.drawLine(QPointF(7.6 * unit, 19 * unit), QPointF(14.4 * unit, 19 * unit))
 
 
-def _microphone(painter, size):
-    _paint_microphone(painter, size, INK)
-
-
-def _record(painter, size):
+def _record(painter, size, ink):
     """A filled dot: recording, and the same red dot the overlay shows."""
     unit = size / 22.0
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(INK)
+    painter.setBrush(ink)
     painter.drawEllipse(QPointF(11 * unit, 11 * unit), 6.4 * unit, 6.4 * unit)
 
 
-def _paused(painter, size):
+def _paused(painter, size, ink):
     """Two bars: the recording is still ours, and nothing is going into it."""
     unit = size / 22.0
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(INK)
+    painter.setBrush(ink)
     for left in (6.4, 12.4):
         painter.drawRoundedRect(
             QRectF(left * unit, 5.0 * unit, 3.2 * unit, 12.0 * unit),
@@ -87,10 +95,10 @@ def _paused(painter, size):
         )
 
 
-def _working(painter, size):
+def _working(painter, size, ink):
     """An arrow chasing its own circle: transcribing, cleaning up, thinking."""
     unit = size / 22.0
-    pen = QPen(INK, 2.0 * unit)
+    pen = QPen(ink, 2.0 * unit)
     pen.setCapStyle(Qt.PenCapStyle.FlatCap)
     painter.setPen(pen)
     painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -101,7 +109,7 @@ def _working(painter, size):
     # The head, as a filled triangle at the open end rather than two more
     # strokes: at 22 points a drawn arrowhead closes up into a blob.
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(INK)
+    painter.setBrush(ink)
     head = QPainterPath()
     head.moveTo(QPointF(11.0 * unit, 1.6 * unit))
     head.lineTo(QPointF(11.0 * unit, 7.2 * unit))
@@ -121,43 +129,87 @@ SHAPES = {
 _cache = {}
 
 
+def _stencil(shape, size, ink, pad=0):
+    """One shape in one colour, held `pad` pixels in from every edge.
+
+    The inset is what leaves room for the outline: the shapes are drawn to the
+    edge of their 22 point square, so a copy shifted outwards would otherwise
+    lose the foot of the microphone and the tip of the arrow to the crop.
+    """
+    pixmap, painter = _canvas(size)
+    try:
+        if pad:
+            painter.translate(pad, pad)
+            painter.scale((size - 2 * pad) / size, (size - 2 * pad) / size)
+        shape(painter, size, ink)
+    finally:
+        painter.end()
+    return pixmap
+
+
+def _outlined(shape, size):
+    """The shape in white, over a dark copy of itself spread a pixel outwards.
+
+    Eight shifted copies rather than a blur or a stroked path: the shapes are a
+    mix of strokes and fills, and this is the one way to put a border round all
+    of them without drawing each one twice by hand.
+    """
+    pad = max(1, round(size / 22.0))
+    outline = _stencil(shape, size, DARK, pad)
+    glyph = _stencil(shape, size, LIGHT, pad)
+    pixmap, painter = _canvas(size)
+    try:
+        for dx in (-pad, 0, pad):
+            for dy in (-pad, 0, pad):
+                painter.drawPixmap(dx, dy, outline)
+        painter.drawPixmap(0, 0, glyph)
+    finally:
+        painter.end()
+    return pixmap
+
+
 def icon(name):
     """The named icon drawn here, or a null QIcon when it is not one of ours.
 
     Cached because the tray is refreshed on every state change and every one of
     those would otherwise redraw three pixmaps. A QIcon is cheap to copy and the
-    pixmaps inside it are shared, so handing the same object out is safe.
+    pixmaps inside it are shared, so handing the same object out is safe. The
+    platform is part of the key rather than settled at import, so that a test
+    can stand on either one.
     """
     shape = SHAPES.get(name)
     if shape is None:
         return QIcon()
-    if name in _cache:
-        return _cache[name]
+    mask = sys.platform == "darwin"
+    if (name, mask) in _cache:
+        return _cache[(name, mask)]
 
     result = QIcon()
     for size in SIZES:
-        pixmap, painter = _canvas(size)
-        try:
-            shape(painter, size)
-        finally:
-            painter.end()
-        result.addPixmap(pixmap)
-    # The line that makes it a template image: macOS then owns the colour, and
-    # the icon follows the menu bar into dark mode instead of staying black.
-    result.setIsMask(True)
-    _cache[name] = result
+        result.addPixmap(_stencil(shape, size, DARK) if mask
+                         else _outlined(shape, size))
+    if mask:
+        # The line that makes it a template image: macOS then owns the colour,
+        # and the icon follows the menu bar into dark mode instead of staying
+        # black. Nothing outside macOS reads it, and setting it there would only
+        # promise a recolouring that never comes.
+        result.setIsMask(True)
+    _cache[(name, mask)] = result
     return result
 
 
 # --- the application icon --------------------------------------------------
 #
-# The menu bar wants a flat stencil; the Finder, the Dock and the permission
-# dialogs want a picture. Same microphone, on a ground of its own, and drawn
-# here as well so that `install-mac.sh` has an .icns to build without a binary
-# blob living in the repository.
+# The menu bar wants a flat stencil; the Finder, the Dock, an application menu
+# and a task bar want a picture. Same microphone, on a ground of its own, and
+# drawn here as well so that `install-mac.sh` has an .icns and `install.sh` a
+# set of PNGs to install without a binary blob living in the repository.
 
 # What iconutil expects to find in an .iconset: each of these at 1x and 2x.
 APP_ICON_SIZES = (16, 32, 128, 256, 512)
+# What an XDG icon theme is asked for: a menu wants 48, a task bar 22 or 24, a
+# file dialog 16, and something scaling for a HiDPI panel wants the big ones.
+HICOLOR_SIZES = (16, 22, 24, 32, 48, 64, 128, 256)
 
 
 def app_pixmap(size):
@@ -184,11 +236,28 @@ def app_pixmap(size):
         painter.translate(size / 2.0, size / 2.0)
         painter.scale(0.64, 0.64)
         painter.translate(-size / 2.0, -size / 2.0)
-        _paint_microphone(painter, size, QColor(0xFF, 0xFF, 0xFF))
+        _microphone(painter, size, LIGHT)
         painter.restore()
     finally:
         painter.end()
     return pixmap
+
+
+_app_icon = None
+
+
+def app_icon():
+    """The application icon as a QIcon, for the windows and whatever lists them.
+
+    Wayland reads it off the .desktop file instead, through the desktop file
+    name the application sets, but X11 has only what the window itself carries.
+    """
+    global _app_icon
+    if _app_icon is None:
+        _app_icon = QIcon()
+        for size in (16, 22, 24, 32, 48, 64, 128):
+            _app_icon.addPixmap(app_pixmap(size))
+    return _app_icon
 
 
 def write_iconset(directory):
@@ -202,21 +271,49 @@ def write_iconset(directory):
     return directory
 
 
+def write_hicolor(directory, name="dikte"):
+    """Install the icon into an XDG theme. The paths it wrote.
+
+    A .desktop file names its icon rather than carrying a path, and a name is
+    only found if some installed theme has it. `audio-input-microphone`, which
+    is what the entries used to name, is in Breeze and in Adwaita but not in
+    hicolor, and hicolor is all Qt and a panel are left with on a session that
+    names no desktop. Under a name of our own in hicolor it is found everywhere,
+    since hicolor is the one theme every desktop is required to fall back to.
+    """
+    directory = pathlib.Path(directory)
+    written = []
+    for size in HICOLOR_SIZES:
+        apps = directory / "hicolor" / f"{size}x{size}" / "apps"
+        apps.mkdir(parents=True, exist_ok=True)
+        path = apps / f"{name}.png"
+        app_pixmap(size).save(str(path), "PNG")
+        written.append(path)
+    return written
+
+
 def _main(argv):
-    """`python3 trayicon.py <path>.iconset`, which install-mac.sh calls.
+    """`trayicon.py <path>.iconset` for install-mac.sh, `--hicolor <dir>` for
+    install.sh.
 
     A QGuiApplication has to exist before a QPixmap can, and offscreen because
     this runs from a shell script with no window to open.
     """
-    if len(argv) != 2:
-        print("usage: trayicon.py <directory>.iconset", file=sys.stderr)
+    hicolor = len(argv) == 3 and argv[1] == "--hicolor"
+    if not hicolor and len(argv) != 2:
+        print("usage: trayicon.py <directory>.iconset\n"
+              "       trayicon.py --hicolor <icon directory>", file=sys.stderr)
         return 2
     from PyQt6.QtGui import QGuiApplication
     QGuiApplication.setAttribute(
         Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
     app = QGuiApplication(["dikte-icon", "-platform", "offscreen"])
     try:
-        print(write_iconset(argv[1]))
+        if hicolor:
+            for path in write_hicolor(argv[2]):
+                print(path)
+        else:
+            print(write_iconset(argv[1]))
     finally:
         del app
     return 0

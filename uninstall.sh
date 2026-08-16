@@ -29,6 +29,7 @@ else
   MACOS=0
   APP_DIR="$HOME/.local/share/applications"
   AUTOSTART_DIR="$HOME/.config/autostart"
+  ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
   CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dikte"
   DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/dikte"
   PY="$(command -v python3 || true)"
@@ -148,6 +149,19 @@ fi
 if ((!MACOS)); then
   remove "$APP_DIR/dikte.desktop"
   remove "$AUTOSTART_DIR/dikte.desktop"
+  # The icon, at each of the sizes install.sh drew it. One line rather than
+  # eight, and the size directories stay: they are the theme's, not ours.
+  icons=0
+  for png in "$ICON_DIR"/hicolor/*/apps/dikte.png; do
+    [[ -e "$png" ]] || continue
+    rm -f "$png"
+    icons=$((icons + 1))
+  done
+  if ((icons)); then
+    ok "Removed the icon from $ICON_DIR/hicolor"
+  else
+    gone "Was not there: $ICON_DIR/hicolor/*/apps/dikte.png"
+  fi
   # Removing the shortcut takes its desktop file with it, but an install from
   # before this script existed may have left one behind on a desktop that never
   # used them.

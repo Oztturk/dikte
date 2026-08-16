@@ -13,6 +13,7 @@ from unittest import mock
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+import audio
 import cleanup
 import config as cfg
 import ggml
@@ -447,6 +448,36 @@ class Overlay(DikteTest):
         widget.show_recording()
         self.assertTrue(widget.showing)
         self.assertFalse(widget.muted)
+
+
+class MeetingSources(DikteTest):
+    """What the Meeting tab says about the far side, per sound system.
+
+    The box that picks it is empty on a system that cannot record it, and an
+    empty box with nothing next to it reads as a list that has not loaded yet.
+    """
+
+    def notes(self, meetings):
+        with mock.patch.object(audio, "sound",
+                               return_value=audio.PULSE._replace(
+                                   meetings=meetings)), \
+                only_these_tools(), \
+                mock.patch.object(settings_ui.SettingsWindow, "_load_models"), \
+                mock.patch.object(settings_ui.SettingsWindow,
+                                  "_load_transcribe_models"):
+            window = settings_ui.SettingsWindow(cfg.Config())
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(window.close)
+        return " ".join(label.text()
+                        for label in window.findChildren(settings_ui.QLabel))
+
+    def test_a_system_that_cannot_record_the_far_side_says_so(self):
+        self.assertIn("nothing that records what the speakers",
+                      self.notes(meetings=False))
+
+    def test_a_system_that_can_says_nothing_of_the_sort(self):
+        self.assertNotIn("nothing that records what the speakers",
+                         self.notes(meetings=True))
 
 
 if __name__ == "__main__":

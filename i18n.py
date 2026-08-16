@@ -623,6 +623,16 @@ TR = {
         "macOS, hoparlörden çıkan sesi kaydedilebilir bir kaynak olarak sunmaz. "
         "BlackHole ya da Loopback kur, toplantının sesini oradan geçir ve "
         "yukarıdan onu seç.",
+    "This system offers nothing that records what the speakers are playing, "
+    "so a meeting cannot be recorded on it. Dictation and transcribing a file "
+    "are unaffected.":
+        "Bu sistem, hoparlörden çıkan sesi kaydeden hiçbir şey sunmuyor; "
+        "burada toplantı kaydedilemez. Dikte ve dosya deşifresi bundan "
+        "etkilenmez.",
+    "This system offers nothing that records what the speakers are playing, "
+    "so a meeting cannot be recorded on it.":
+        "Bu sistem, hoparlörden çıkan sesi kaydeden hiçbir şey sunmuyor; "
+        "burada toplantı kaydedilemez.",
     "Wear headphones if you can. Through speakers your microphone hears the "
     "other side as well, and although a line that lands on both channels at "
     "once is dropped again, the repair is never as clean as not needing it.":

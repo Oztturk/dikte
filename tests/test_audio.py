@@ -822,6 +822,42 @@ class MacRecordingCommand(OnMacOS, DikteTest):
         self.assertFalse(recorder.active)
 
 
+class NoFarSideToRecord(DikteTest):
+    """Two different answers, and the table is what tells them apart.
+
+    A sound system that records the far side has a device this machine could
+    not pick out, and Settings is where to choose one. A sound system that does
+    not had nothing to offer there in the first place, and "pick one" would
+    send somebody to an empty box and an installation that cannot help.
+    """
+
+    def failure(self, meetings):
+        recorder = audio.MeetingRecorder()
+        failures = []
+        recorder.failed.connect(failures.append)
+        with only_these_tools("ffmpeg"), \
+                mock.patch.object(audio, "default_monitor", return_value=""), \
+                mock.patch.object(audio, "sound",
+                                  return_value=audio.PULSE._replace(
+                                      meetings=meetings)):
+            recorder.start(str(self.path("meeting.wav")))
+        self.assertFalse(recorder.active)
+        return failures[0]
+
+    def test_a_system_that_records_the_far_side_sends_you_to_settings(self):
+        self.assertIn("Settings", self.failure(True))
+
+    def test_a_system_that_does_not_says_that_instead(self):
+        message = self.failure(False)
+        self.assertIn("nothing that records what the speakers", message)
+        self.assertNotIn("Settings", message)
+
+    def test_the_three_sound_systems_each_answer_the_question(self):
+        self.assertTrue(audio.PULSE.meetings)
+        self.assertTrue(audio.COREAUDIO.meetings)
+        self.assertFalse(audio.DSHOW.meetings)
+
+
 class OnWindows:
     """A test that runs as if the machine ran Windows."""
 
@@ -837,51 +873,108 @@ class WindowsDevices(OnWindows, DikteTest):
     whatever alphabet the machine speaks, so the listing here does too.
     """
 
+    MIC = "@device_cm_{33D9A762}\\wave_{B1C2}"
     LISTING = (
         '[dshow @ 0000020c] "Integrated Camera" (video)\n'
         '[dshow @ 0000020c]   Alternative name "@device_pnp_\\...."\n'
         '[dshow @ 0000020c] "Mikrofon Dizisi (Intel Smart Sound)" (audio)\n'
-        '[dshow @ 0000020c]   Alternative name "@device_cm_{33D9A762}...."\n'
+        f'[dshow @ 0000020c]   Alternative name "{MIC}"\n'
         '[dshow @ 0000020c] "Kulaklık (Soundcore Life Q30)" (audio)\n'
+        '[dshow @ 0000020c] Could not find audio only device with name '
+        '"dummy" among source devices of type audio.\n'
         "dummy: Immediate exit requested\n"
     ).encode("utf-8")
+
+    def setUp(self):
+        super().setUp()
+        # The listing is remembered between calls, so that a dictation does not
+        # run ffmpeg of its own. It cannot be remembered between tests.
+        audio._DSHOW_SEEN.clear()
+        self.addCleanup(audio._DSHOW_SEEN.clear)
 
     @contextlib.contextmanager
     def listing(self, stderr=None, tools=("ffmpeg",)):
         completed = FakeCompleted(
             returncode=1, stderr=self.LISTING if stderr is None else stderr)
         with only_these_tools(*tools), \
-                mock.patch.object(subprocess, "run", return_value=completed):
-            yield
+                mock.patch.object(subprocess, "run",
+                                  return_value=completed) as run:
+            yield run
 
     def test_windows_records_through_dshow(self):
         self.assertIs(audio.sound(), audio.DSHOW)
 
-    def test_the_audio_lines_are_the_only_ones_read(self):
+    def test_the_audio_devices_are_the_only_ones_read(self):
         with self.listing():
             self.assertEqual(audio.list_sources(), [
-                ("Mikrofon Dizisi (Intel Smart Sound)",
-                 "Mikrofon Dizisi (Intel Smart Sound)"),
+                (self.MIC, "Mikrofon Dizisi (Intel Smart Sound)"),
                 ("Kulaklık (Soundcore Life Q30)",
                  "Kulaklık (Soundcore Life Q30)"),
             ])
+
+    def test_the_device_ffmpeg_could_not_open_is_not_one_of_them(self):
+        """The command ends by quoting the name it was sent to look for."""
+        with self.listing():
+            self.assertNotIn("dummy", [name for _, name in audio.list_sources()])
+
+    def test_a_listing_from_an_ffmpeg_that_marks_nothing(self):
+        """Older builds print a heading instead of an (audio) on every line."""
+        listing = (
+            '[dshow @ 0] DirectShow video devices\n'
+            '[dshow @ 0]  "Integrated Camera"\n'
+            '[dshow @ 0]     Alternative name "@device_pnp_\\..."\n'
+            '[dshow @ 0] DirectShow audio devices\n'
+            '[dshow @ 0]  "Microphone (Realtek Audio)"\n'
+            '[dshow @ 0]     Alternative name "@device_cm_{ABCD}"\n'
+        ).encode("utf-8")
+        with self.listing(stderr=listing):
+            self.assertEqual(audio.list_sources(),
+                             [("@device_cm_{ABCD}", "Microphone (Realtek Audio)")])
+
+    def test_two_devices_called_the_same_thing_stay_apart(self):
+        """The normal state of a laptop with a headset plugged into it."""
+        listing = (
+            '[dshow @ 0] "Microphone" (audio)\n'
+            '[dshow @ 0]   Alternative name "@device_cm_{ONE}"\n'
+            '[dshow @ 0] "Microphone" (audio)\n'
+            '[dshow @ 0]   Alternative name "@device_cm_{TWO}"\n'
+        ).encode("utf-8")
+        with self.listing(stderr=listing):
+            sources = audio.list_sources()
+        self.assertEqual([identifier for identifier, _ in sources],
+                         ["@device_cm_{ONE}", "@device_cm_{TWO}"])
+        self.assertEqual({name for _, name in sources}, {"Microphone"})
 
     def test_no_ffmpeg_installed(self):
         with only_these_tools():
             self.assertEqual(audio.list_sources(), [])
             self.assertEqual(audio.recording_command(), [])
 
-    def test_the_name_is_what_the_recorder_is_given_back(self):
+    def test_the_identifier_is_what_the_recorder_is_given_back(self):
         with self.listing():
-            cmd = audio.recording_command("Kulaklık (Soundcore Life Q30)")
+            cmd = audio.recording_command(self.MIC)
         self.assertEqual(cmd[cmd.index("-f") + 1], "dshow")
-        self.assertIn("audio=Kulaklık (Soundcore Life Q30)", cmd)
+        self.assertIn(f"audio={self.MIC}", cmd)
 
     def test_no_microphone_named_means_the_first_one_listed(self):
         """dshow has no default device for an empty target to mean."""
         with self.listing():
-            self.assertIn("audio=Mikrofon Dizisi (Intel Smart Sound)",
-                          audio.recording_command())
+            self.assertIn(f"audio={self.MIC}", audio.recording_command())
+
+    def test_a_dictation_does_not_run_a_listing_of_its_own(self):
+        """Two hundred milliseconds of ffmpeg in front of every key press."""
+        with self.listing() as run:
+            audio.list_sources()
+            audio.recording_command()
+            audio.recording_command()
+        self.assertEqual(run.call_count, 1)
+
+    def test_opening_the_device_list_asks_again(self):
+        """Which is what somebody who has just plugged one in does."""
+        with self.listing() as run:
+            audio.list_sources()
+            audio.list_sources()
+        self.assertEqual(run.call_count, 2)
 
     def test_a_machine_with_no_microphone_at_all(self):
         with self.listing(stderr=b'[dshow @ 0] "Integrated Camera" (video)\n'):
@@ -898,6 +991,15 @@ class WindowsDevices(OnWindows, DikteTest):
             self.assertEqual(audio.list_monitors(), [])
             self.assertEqual(audio.default_monitor(), "")
             self.assertEqual(audio.meeting_commands("mic", "sys"), [])
+
+    def test_a_meeting_says_what_is_wrong_rather_than_where_to_look(self):
+        recorder = audio.MeetingRecorder()
+        failures = []
+        recorder.failed.connect(failures.append)
+        with self.listing():
+            recorder.start(str(self.path("meeting.wav")))
+        self.assertIn("nothing that records what the speakers", failures[0])
+        self.assertFalse(recorder.active)
 
 
 if __name__ == "__main__":

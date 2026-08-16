@@ -16,6 +16,7 @@ PY="$(command -v python3)"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/applications"
 AUTOSTART_DIR="$HOME/.config/autostart"
+ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons"
 SHORTCUT="${1:-Ctrl+Space}"
 # Without the colon, so that a second argument given as "" stays empty. That is
 # how update.sh says "this one was turned off", as against not saying anything.
@@ -81,7 +82,7 @@ if [[ "${XDG_SESSION_TYPE:-}" != "x11" ]] && command -v ydotool >/dev/null; then
 fi
 
 # 3. Launchers -------------------------------------------------------------
-mkdir -p "$BIN_DIR" "$APP_DIR" "$AUTOSTART_DIR"
+mkdir -p "$BIN_DIR" "$APP_DIR" "$AUTOSTART_DIR" "$ICON_DIR"
 ln -sf "$DIR/dikte.py" "$BIN_DIR/dikte"
 chmod +x "$DIR/dikte.py"
 ok "Command installed: $BIN_DIR/dikte"
@@ -90,13 +91,33 @@ case ":$PATH:" in
   *) warn "$BIN_DIR is not on your PATH. For fish: fish_add_path $BIN_DIR" ;;
 esac
 
+# The icon, drawn by trayicon.py so that there is no binary in the repository,
+# and installed under a name of our own. Naming a theme icon like
+# audio-input-microphone instead only works where a theme has it: on i3 or a
+# bare X11 login Qt is left with hicolor, which has no such name, and the entry
+# comes out blank. hicolor is also where this goes, since it is the theme every
+# desktop must fall back to.
+if "$PY" "$DIR/trayicon.py" --hicolor "$ICON_DIR" >/dev/null 2>&1; then
+  ICON=dikte
+  # Only GTK reads a cache, and only if one is already there; a stale cache
+  # would otherwise hide the file we just wrote.
+  if command -v gtk-update-icon-cache >/dev/null \
+     && [[ -f "$ICON_DIR/hicolor/icon-theme.cache" ]]; then
+    gtk-update-icon-cache -q -f -t "$ICON_DIR/hicolor" 2>/dev/null || true
+  fi
+  ok "Icon installed: $ICON_DIR/hicolor"
+else
+  ICON=audio-input-microphone
+  warn "Could not draw the icon, so the entries name your theme's microphone"
+fi
+
 cat > "$APP_DIR/dikte.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Dikte
 Comment=Voice dictation: record, transcribe, clean up, paste
 Exec=$PY $DIR/dikte.py
-Icon=audio-input-microphone
+Icon=$ICON
 Categories=Utility;AudioVideo;
 StartupNotify=false
 EOF
@@ -107,7 +128,7 @@ cat > "$AUTOSTART_DIR/dikte.desktop" <<EOF
 Type=Application
 Name=Dikte
 Exec=$PY $DIR/dikte.py
-Icon=audio-input-microphone
+Icon=$ICON
 X-GNOME-Autostart-enabled=true
 StartupNotify=false
 EOF

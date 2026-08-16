@@ -1093,6 +1093,12 @@ def run_app(args):
     app = QApplication(sys.argv)
     app.setApplicationName("Dikte")
     app.setDesktopFileName("dikte")
+    # Wayland goes from that name to the .desktop file and takes the icon from
+    # there, and macOS takes it from the bundle, but an X11 window has only what
+    # it carries itself, and a settings window with no icon is a blank square in
+    # every task bar and alt-tab list.
+    if sys.platform != "darwin":
+        app.setWindowIcon(trayicon.app_icon())
     app.setQuitOnLastWindowClosed(False)
     _stay_out_of_the_dock()
     # Before Dikte is built, because building it is what may start a server, and

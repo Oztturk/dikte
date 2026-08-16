@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import unittest
 import wave
 from unittest import mock
@@ -249,6 +250,34 @@ class FakeProcess:
 
     def kill(self):
         self._alive = False
+
+
+class StalledProcess(FakeProcess):
+    """A capture that hands over a buffer and then stops answering at all.
+
+    Not the same thing as one that ends: the device is still there and the pipe
+    is still open, and a read of it never comes back.
+    """
+
+    def __init__(self, data):
+        super().__init__(data)
+        self.stdout = _StalledStream(data)
+
+
+class _StalledStream:
+    def __init__(self, data):
+        self._data = io.BytesIO(data)
+        self._released = threading.Event()
+
+    def read(self, size):
+        chunk = self._data.read(size)
+        if chunk:
+            return chunk
+        self._released.wait()
+        return b""
+
+    def release(self):
+        self._released.set()
 
 
 class RecordingCommand(OnLinux, DikteTest):
@@ -486,8 +515,10 @@ class MeetingCommands(unittest.TestCase):
 
     def commands(self, platform, mic="", system="them"):
         with mock.patch.object(sys, "platform", platform), \
-                mock.patch.object(audio, "_resolve_avfoundation_target",
-                                  side_effect=lambda target: target or "default"):
+                mock.patch.object(audio, "_avfoundation_inputs", return_value=[]), \
+                mock.patch.object(
+                    audio, "_resolve_avfoundation_target",
+                    side_effect=lambda target, inputs=None: target or "default"):
             return audio.meeting_commands(mic, system)
 
     def test_linux_reads_both_through_pulse(self):
@@ -529,23 +560,41 @@ class MeetingCommands(unittest.TestCase):
                 for command in self.commands(platform):
                     self.assertIn("-nostdin", command)
 
+    def test_both_mac_devices_are_read_off_one_listing(self):
+        """Asking twice costs an ffmpeg run, and the second answer could have
+        renumbered between the two."""
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch.object(audio, "_avfoundation_inputs",
+                                  return_value=[("0", "mine"),
+                                                ("1", "them")]) as inputs:
+            audio.meeting_commands("mine", "them")
+        inputs.assert_called_once_with()
+
 
 class MacMeetingRecorder(OnMacOS, DikteTest):
+    # Whichever way the machine has them ordered, a name is what is saved and
+    # the index it happens to hold now is what ffmpeg is given.
+    DEVICES = [("0", "External Headset"), ("1", "BlackHole 2ch"),
+               ("2", "MacBook Pro Microphone")]
+
+    def devices(self):
+        return mock.patch.object(audio, "_avfoundation_inputs",
+                                 return_value=self.DEVICES)
+
     def record(self, mine, theirs):
         path = str(self.path("meeting.wav"))
         recorder = audio.MeetingRecorder()
-        stopped, failed = [], []
+        stopped, failed, warnings = [], [], []
         recorder.stopped.connect(lambda *args: stopped.append(args))
         recorder.failed.connect(failed.append)
+        recorder.warned.connect(warnings.append)
         processes = [FakeProcess(mine), FakeProcess(theirs)]
-        with only_these_tools("ffmpeg"), \
-                mock.patch.object(audio, "_resolve_avfoundation_target",
-                                  side_effect=("2", "1")), \
+        with only_these_tools("ffmpeg"), self.devices(), \
                 mock.patch.object(subprocess, "Popen", side_effect=processes) as popen:
             recorder.start(path, "MacBook Pro Microphone", "BlackHole 2ch")
             recorder._thread.join(timeout=5)
             recorder.stop()
-        return path, recorder, stopped, failed, processes, popen
+        return path, warnings, stopped, failed, processes, popen
 
     def test_the_two_capture_processes_become_one_stereo_file(self):
         path, _, stopped, failed, _, _ = self.record(
@@ -567,14 +616,42 @@ class MacMeetingRecorder(OnMacOS, DikteTest):
         self.assertIn(":2", commands[0])
         self.assertIn(":1", commands[1])
 
-    def test_an_unusable_mostly_empty_microphone_is_not_transcribed(self):
-        path, _, stopped, failed, _, _ = self.record(
+    def test_a_mostly_empty_microphone_is_said_out_loud_and_still_kept(self):
+        """Half the file is everyone else, and an hour of them is worth more
+        than the empty channel costs."""
+        path, warnings, stopped, failed, _, _ = self.record(
             silence(11.0), tone(11.0)
         )
-        self.assertEqual(stopped, [])
-        self.assertEqual(len(failed), 1)
-        self.assertIn("empty", failed[0])
-        self.assertFalse(os.path.exists(path))
+        self.assertEqual(failed, [])
+        self.assertEqual(len(stopped), 1)
+        self.assertTrue(os.path.exists(path))
+        self.assertIn("empty", warnings[0])
+
+    def test_a_microphone_that_was_merely_quiet_is_not_complained_about(self):
+        _, warnings, stopped, _, _, _ = self.record(tone(11.0), tone(11.0))
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(stopped), 1)
+
+    def test_a_capture_that_falls_silent_ends_the_meeting_rather_than_hanging(self):
+        """One thread taking turns on both pipes would sit on the dead read
+        until somebody noticed, an hour later."""
+        path = str(self.path("meeting.wav"))
+        recorder = audio.MeetingRecorder()
+        stopped = []
+        recorder.stopped.connect(lambda *args: stopped.append(args))
+        mine, theirs = StalledProcess(tone(0.512)), FakeProcess(tone(30.0))
+        with only_these_tools("ffmpeg"), self.devices(), \
+                mock.patch.object(audio, "STALL_SECONDS", 0.2), \
+                mock.patch.object(subprocess, "Popen", side_effect=(mine, theirs)):
+            try:
+                recorder.start(path, "MacBook Pro Microphone", "BlackHole 2ch")
+                recorder._thread.join(timeout=2)
+                self.assertFalse(recorder.active)
+                recorder.stop()
+            finally:
+                mine.stdout.release()
+        self.assertAlmostEqual(stopped[0][1], 0.512, places=3)
+        self.assertTrue(os.path.exists(path))
 
     def test_stopping_ends_both_capture_processes(self):
         _, _, _, _, processes, _ = self.record(tone(0.5), tone(0.5))
@@ -584,22 +661,21 @@ class MacMeetingRecorder(OnMacOS, DikteTest):
         recorder = audio.MeetingRecorder()
         failed = []
         recorder.failed.connect(failed.append)
-        with only_these_tools("ffmpeg"), \
-                mock.patch.object(audio, "_avfoundation_inputs", return_value=[]), \
+        with only_these_tools("ffmpeg"), self.devices(), \
                 mock.patch.object(subprocess, "Popen") as popen:
             recorder.start(str(self.path("meeting.wav")), "2", "1")
         popen.assert_not_called()
         self.assertIn("old numeric index", failed[0])
 
     def test_a_second_capture_process_that_cannot_start_cleans_up_the_first(self):
+        """A Mac left holding an open AVFoundation session records nothing
+        else until it is let go."""
         path = str(self.path("meeting.wav"))
         recorder = audio.MeetingRecorder()
         failed = []
         recorder.failed.connect(failed.append)
         first = FakeProcess(tone(1.0))
-        with only_these_tools("ffmpeg"), \
-                mock.patch.object(audio, "_resolve_avfoundation_target",
-                                  side_effect=("2", "1")), \
+        with only_these_tools("ffmpeg"), self.devices(), \
                 mock.patch.object(subprocess, "Popen",
                                   side_effect=(first, OSError("refused"))):
             recorder.start(path, "MacBook Pro Microphone", "BlackHole 2ch")

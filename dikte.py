@@ -123,6 +123,7 @@ class Dikte:
         self.meeting_recorder.levels.connect(self._on_meeting_levels)
         self.meeting_recorder.stopped.connect(self._on_meeting_recorded)
         self.meeting_recorder.died.connect(self._on_meeting_died)
+        self.meeting_recorder.warned.connect(self._on_meeting_warning)
         self.meeting_recorder.failed.connect(self._on_meeting_error)
         self.meetings.progress.connect(self._on_meeting_progress)
         self.meetings.finished.connect(self._on_meeting_finished)
@@ -720,6 +721,11 @@ class Dikte:
         self._set_meeting_state(M_IDLE)
         self._settle(MEETING, {"ok": False, "error": message})
         self._on_error(message)
+
+    def _on_meeting_warning(self, message):
+        """It was recorded and it is being written up, but read this first."""
+        self.tray.showMessage("Dikte", message,
+                              QSystemTrayIcon.MessageIcon.Warning, 12000)
 
     def _on_meeting_died(self):
         if self.meeting_state != M_RECORDING:

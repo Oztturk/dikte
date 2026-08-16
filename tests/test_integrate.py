@@ -54,7 +54,11 @@ class Home(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.home = pathlib.Path(self.tmp.name)
+        # Resolved, because target() resolves what it is handed and a Mac's
+        # temporary directory is under /var, which is a symlink to /private/var.
+        # Left alone, every path here would be compared against the other
+        # spelling of itself.
+        self.home = pathlib.Path(self.tmp.name).resolve()
         self.addCleanup(self.tmp.cleanup)
         self.applications = self.home / ".local/share/applications"
         self.autostart = self.home / ".config/autostart"

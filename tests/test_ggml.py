@@ -439,7 +439,7 @@ class Catalogue(Local):
 
 
 STAND_IN = textwrap.dedent("""
-    import http.server, sys, threading, time
+    import http.server, socketserver, sys, threading, time
 
     args = sys.argv[1:]
 
@@ -465,7 +465,17 @@ STAND_IN = textwrap.dedent("""
         def log_message(self, *a):
             pass
 
-    server = http.server.HTTPServer((opt("--host"), int(opt("--port"))), Handler)
+    # The same server, without the reverse lookup of the address it bound.
+    # http.server asks the resolver for the name behind 127.0.0.1 in between
+    # binding and listening; on a Mac nothing answers and the call sits in a
+    # timeout for half a minute, all of it with the port still closed and a
+    # start waiting on it.
+    class Bound(http.server.HTTPServer):
+        def server_bind(self):
+            socketserver.TCPServer.server_bind(self)
+            self.server_name, self.server_port = self.server_address[:2]
+
+    server = Bound((opt("--host"), int(opt("--port"))), Handler)
     print("listening on " + opt("--port"), flush=True)
     server.serve_forever()
 """)

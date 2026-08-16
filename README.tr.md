@@ -23,6 +23,16 @@ paketleri dışında bağımlılığı yok: sadece Python standart kütüphanesi
 
 ## Kurulum
 
+[Sürümler sayfasında](../../releases) bir AppImage, bir de her Mac mimarisi
+için birer disk imajı var. İkisi de ilk çalıştıklarında kendi menü girdisini,
+oturum açılışını ve `dikte` komutunu yazar, makinede zaten duran bir kuruluma
+dokunmazlar; `dikte integrate --remove` yazdıklarını geri alır. AppImage yine
+de aşağıdaki sistem paketlerini ister: ses sunucusu, pano ve klavye onlardan
+gelir. Disk imajı bir Apple sertifikasıyla imzalı değil, bu yüzden ilk açılış
+reddedilir, Sistem Ayarları → Gizlilik ve Güvenlik altından **Yine de Aç**
+demek gerekir; macOS her güncellemeden sonra mikrofonu ve Erişilebilirliği
+yeniden sorar, checkout'tan kurmak bundan kurtarır.
+
 ```sh
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
 systemctl --user enable --now ydotool     # otomatik yapıştırma için
@@ -200,8 +210,10 @@ Kısayollar sekmesi bağlanacak komutu gösterir.
 
 Aşağıdakilerin hepsi `dikte` paketinin içinde: `python3 -m dikte` bunu çalıştırır,
 içindeki `__main__.py` de her başlatıcının ve kısayolun adlandırdığı dosyadır.
-`scripts/` altında install-mac.sh, update.sh ve uninstall.sh var; install.sh en
-üstte kalır, `tests/` içinde de her modülün bir dosyası.
+`scripts/` altında install-mac.sh, update.sh, uninstall.sh ve release.sh var;
+`packaging/` release.sh'ın attığı etiketin yayımladığı AppImage ile disk
+imajını derler; install.sh en üstte kalır, `tests/` içinde de her modülün bir
+dosyası.
 
 ```
 app.py            giriş noktası, tepsi simgesi, durum makinesi
@@ -222,6 +234,7 @@ settings_ui.py    ayarlar penceresi
 hotkey.py         masaüstünün kısayol kaydı, evdev dinleyici, Mac'te Carbon
 paste.py          wl-clipboard ve ydotool sarmalayıcıları, pbcopy ve CoreGraphics
 trayicon.py       tepsi simgeleri, ikon teması olmayan yerler için çizilmiş
+integrate.py      indirilen bir yapının indiği masaüstüne yazdıkları
 i18n.py           metin tablosu
 ```
 

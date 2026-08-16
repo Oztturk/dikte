@@ -44,6 +44,7 @@ from . import config as cfg  # noqa: E402
 from . import ggml  # noqa: E402
 from . import hotkey  # noqa: E402
 from . import i18n  # noqa: E402
+from . import integrate  # noqa: E402
 from . import ipc  # noqa: E402
 from . import meeting  # noqa: E402
 from . import trayicon  # noqa: E402
@@ -966,7 +967,8 @@ class Dikte:
             self.settings_window.close()
         self.shutdown()
         QLocalServer.removeServer(SERVER_NAME)
-        os.execv(sys.executable, [sys.executable, ipc.script_path(), "--gui"])
+        args = ipc.launcher() + ["--gui"]
+        os.execv(args[0], args)
 
     def shutdown(self):
         self._quitting = True
@@ -1102,6 +1104,11 @@ def run_app(args):
         app.setWindowIcon(trayicon.app_icon())
     app.setQuitOnLastWindowClosed(False)
     _stay_out_of_the_dock()
+    # A downloaded build ran no installer, so it writes its own menu entry,
+    # login item and icon. Here rather than in main() because drawing that icon
+    # needs the QApplication above, and quiet because there is nothing to say
+    # on every start after the first.
+    integrate.ensure()
     # Before Dikte is built, because building it is what may start a server, and
     # a signal arriving in the middle of that would otherwise take the default
     # action and leave the server behind. A signal this early lands in the

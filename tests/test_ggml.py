@@ -725,6 +725,15 @@ class WindowsAssets(Local):
         self.assertEqual(ggml._wanted_assets(ggml.LLAMA),
                          ("bin-win-cpu-arm64.zip",))
 
+    def test_an_arm_machine_is_handed_the_x64_whisper_anyway(self):
+        """whisper.cpp publishes no arm64 build for Windows: the release has
+        Win32 and x64 and nothing else, so emulated is the only local option
+        a Snapdragon has. Pinned here so that a release which does start
+        publishing one is noticed rather than quietly ignored."""
+        self.patch_attr(ggml, "_arch", lambda: "arm64")
+        self.assertEqual(ggml._wanted_assets(ggml.WHISPER),
+                         ("whisper-blas-bin-x64.zip", "whisper-bin-x64.zip"))
+
 
 class InstallOnWindows(Local):
     """The Windows releases are zips, and the binary carries .exe."""

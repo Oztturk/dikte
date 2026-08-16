@@ -54,7 +54,9 @@ python dikte.py
 
 - The local install fetches whisper.cpp's **OpenBLAS build**, which
   transcribes about twice as fast as the stock one on a plain CPU. There is
-  no GPU build to fetch for machines without an NVIDIA card.
+  no GPU build to fetch for machines without an NVIDIA card, and none for
+  Windows on ARM either: whisper.cpp publishes x64 only, so a Snapdragon
+  machine runs it under emulation and the cloud is the faster option there.
 - Setting Settings → API and models → **Threads** near your physical core
   count helps noticeably; the server's own default is 4.
 - If speed matters more than accuracy, `ggml-small` and `ggml-base` are much

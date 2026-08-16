@@ -251,6 +251,10 @@ def _wanted_assets(program):
             # as fast as the stock one, and it carries everything it needs.
             # Full names, because "bin-x64.zip" alone would also match the
             # CUDA archives, whichever the release happened to list first.
+            #
+            # x64 whatever this machine is, because whisper.cpp publishes no
+            # arm64 build for Windows: a Snapdragon runs this one emulated,
+            # which is slow but is the only local option there is.
             return ("whisper-blas-bin-x64.zip", "whisper-bin-x64.zip")
         if _has_vulkan() and arch == "x64":
             return ("bin-win-vulkan-x64.zip", f"bin-win-cpu-{arch}.zip")

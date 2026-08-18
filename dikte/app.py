@@ -637,12 +637,24 @@ class Dikte:
         # inactive: at forty the title bar visibly blinks, at ten it does not.
         # Two messages to AppKit per tick, for at most a second and a half.
         watch.setInterval(10)
+        # activateWithOptions: answers whether macOS accepted the request, not
+        # whether the other application is already back in front.  Keep the
+        # watch alive until that asynchronous handoff is observable; on Intel
+        # Macs it can take hundreds of milliseconds after the call returned.
+        restore_requested = False
 
         def look():
-            if mac_window.is_frontmost():
-                mac_window.activate(was_in_front)
+            nonlocal restore_requested
+            if time.monotonic() > deadline:
                 self._stop_watching_the_front()
-            elif time.monotonic() > deadline:
+                return
+            if mac_window.is_frontmost():
+                if not restore_requested:
+                    restore_requested = mac_window.activate(was_in_front)
+            elif restore_requested:
+                # The request has landed.  Stop only now, rather than as soon
+                # as AppKit accepted it, so a delayed or failed handoff stays
+                # under observation until the deadline guard above.
                 self._stop_watching_the_front()
 
         watch.timeout.connect(look)

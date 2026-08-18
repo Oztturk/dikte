@@ -604,7 +604,7 @@ class GivingTheFrontBack(DikteTest):
         from dikte import mac_window
         self.dikte = dikte_module
         self.activated = []
-        self.patch_attr(mac_window, "activate", self.activated.append)
+        self.patch_attr(mac_window, "activate", self.activate)
         self.ticks = []
         outer = self
 
@@ -645,6 +645,10 @@ class GivingTheFrontBack(DikteTest):
 
         self.bare = BareDikte
 
+    def activate(self, pid):
+        self.activated.append(pid)
+        return True
+
     def watching(self, was_in_front, dikte_in_front, on=None):
         from dikte import mac_window
         self.patch_attr(mac_window, "is_frontmost", lambda: dikte_in_front)
@@ -656,7 +660,36 @@ class GivingTheFrontBack(DikteTest):
         watch = self.watching(4242, dikte_in_front=True)
         watch.tick()
         self.assertEqual(self.activated, [4242])
-        self.assertFalse(watch.running)   # one is enough; it stops watching
+        self.assertTrue(watch.running)    # accepted is not the same as landed
+        self.patch_attr(self.mac_window_module(), "is_frontmost", lambda: False)
+        watch.tick()
+        self.assertFalse(watch.running)
+
+    def test_an_accepted_restore_is_not_sent_again_while_it_is_landing(self):
+        watch = self.watching(4242, dikte_in_front=True)
+        watch.tick()
+        watch.tick()
+        self.assertEqual(self.activated, [4242])
+        self.assertTrue(watch.running)
+
+    def test_an_accepted_restore_that_never_lands_still_times_out(self):
+        watch = self.watching(4242, dikte_in_front=True)
+        watch.tick()
+        with mock.patch.object(self.dikte.time, "monotonic",
+                               return_value=self.dikte.time.monotonic() + 60):
+            watch.tick()
+        self.assertFalse(watch.running)
+        self.assertEqual(self.activated, [4242])
+
+    def test_a_restore_the_system_refused_is_retried(self):
+        from dikte import mac_window
+        self.patch_attr(mac_window, "activate",
+                        lambda pid: self.activated.append(pid) or False)
+        watch = self.watching(4242, dikte_in_front=True)
+        watch.tick()
+        watch.tick()
+        self.assertEqual(self.activated, [4242, 4242])
+        self.assertTrue(watch.running)
 
     def test_a_front_that_was_never_taken_is_left_where_it_is(self):
         """The microphone does not always take it, and pulling an application

@@ -1,12 +1,14 @@
-# PyInstaller's description of the build, shared by the AppImage and the disk
-# image. Run it through build-appimage.sh or build-dmg.sh rather than by hand:
-# each of those has a few steps of its own on either side of this.
+# PyInstaller's description of the build, shared by the AppImage, the disk
+# image and the Windows setup. Run it through build-appimage.sh, build-dmg.sh
+# or build-windows.ps1 rather than by hand: each of those has a few steps of
+# its own on either side of this.
 #
-# A directory rather than a single file, on both platforms. Onefile unpacks
-# itself into /tmp on every start, which for something a global shortcut is
-# meant to bring up is a second of nothing happening, and for the AppImage it
-# would be an unpacking inside an unpacking. The single file people download is
-# the AppImage and the .dmg; this only has to be tidy inside them.
+# A directory rather than a single file, on all three. Onefile unpacks itself
+# into a temporary directory on every start, which for something a global
+# shortcut is meant to bring up is a second of nothing happening, and for the
+# AppImage it would be an unpacking inside an unpacking. The single file people
+# download is the AppImage, the .dmg and the setup program; this only has to be
+# tidy inside them.
 
 import os
 import pathlib
@@ -24,6 +26,7 @@ __version__ = re.search(r'^__version__ = "(.*)"$',
                         re.M).group(1)
 
 MACOS = sys.platform == "darwin"
+WINDOWS = sys.platform == "win32"
 BUNDLE_ID = "io.github.yusufipk.dikte"
 
 # PyQt6's wheel is most of the build, and most of the wheel is modules nothing
@@ -60,19 +63,41 @@ executable = EXE(                               # noqa: F821
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="Dikte" if MACOS else "dikte",
+    name="Dikte" if MACOS or WINDOWS else "dikte",
     console=False,
-    # Both platforms use whatever the machine is, because neither build is
+    # Every platform uses whatever the machine is, because no build here is
     # cross-compiled: the workflow runs one job per architecture.
     target_arch=None,
     # Ad-hoc, and only on a Mac, where an arm64 binary that carries no
     # signature at all is refused by the kernel rather than merely warned
     # about. build-dmg.sh signs the finished bundle over the top of this.
     codesign_identity="-" if MACOS else None,
+    # Windows keeps the icon inside the executable, and build-windows.ps1 draws
+    # it from the same shapes the tray uses. A Mac reads the one BUNDLE names
+    # below, and the AppImage installs PNGs into the icon theme instead.
+    icon=os.environ.get("DIKTE_ICO") or None,
 )
+
+# The same program a second time, as a console application, and only on
+# Windows. A windowed executable there is one the loader gives no console and
+# no standard output at all, so `dikte doctor` started from a terminal would
+# print nothing to it and answer nothing to a script. Everywhere else the one
+# executable does both jobs: a terminal that started it keeps its output, and
+# nothing opens a window nobody asked for.
+console_executable = EXE(                       # noqa: F821
+    archive,
+    analysis.scripts,
+    [],
+    exclude_binaries=True,
+    name="dikte",
+    console=True,
+    target_arch=None,
+    icon=os.environ.get("DIKTE_ICO") or None,
+) if WINDOWS else None
 
 collection = COLLECT(                           # noqa: F821
     executable,
+    *([console_executable] if WINDOWS else []),
     analysis.binaries,
     analysis.datas,
     name="dikte",

@@ -23,9 +23,10 @@ outwards, which stands out on a dark bar and stays readable on a light one.
 """
 
 import pathlib
+import struct
 import sys
 
-from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtCore import QBuffer, QPointF, QRectF, Qt
 from PyQt6.QtGui import (QColor, QIcon, QLinearGradient, QPainter, QPainterPath,
                          QPen, QPixmap)
 
@@ -210,6 +211,9 @@ APP_ICON_SIZES = (16, 32, 128, 256, 512)
 # What an XDG icon theme is asked for: a menu wants 48, a task bar 22 or 24, a
 # file dialog 16, and something scaling for a HiDPI panel wants the big ones.
 HICOLOR_SIZES = (16, 22, 24, 32, 48, 64, 128, 256)
+# What goes into the .ico: the Windows shell picks the nearest of these itself,
+# and 256 is the one the large view in Explorer and the setup program read.
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)
 
 
 def app_pixmap(size):
@@ -292,26 +296,63 @@ def write_hicolor(directory, name="dikte"):
     return written
 
 
+def write_ico(path):
+    """Write the Windows icon, every size in the one file. The path it wrote.
+
+    An .ico is a directory of images and a run of image data after it, and
+    since Vista each image may be a PNG rather than the bitmap-and-mask pair
+    the format started with. PNGs are what Qt can already produce, so the
+    twenty bytes of header per size are the whole of the work, and it saves
+    both a build dependency and an icon file in the repository.
+    """
+    path = pathlib.Path(path)
+    images = []
+    for size in ICO_SIZES:
+        buffer = QBuffer()
+        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+        app_pixmap(size).save(buffer, "PNG")
+        images.append((size, bytes(buffer.data())))
+        buffer.close()
+
+    # 0, then 1 for an icon rather than a cursor, then the count.
+    header = struct.pack("<HHH", 0, 1, len(images))
+    offset = len(header) + 16 * len(images)
+    entries, data = b"", b""
+    for size, png in images:
+        # A side of 256 is written as 0: the field is one byte, and the format
+        # spends it on the sizes below that rather than on the one above.
+        entries += struct.pack("<BBBBHHII", size % 256, size % 256, 0, 0,
+                               1, 32, len(png), offset)
+        offset += len(png)
+        data += png
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(header + entries + data)
+    return path
+
+
 def _main(argv):
     """`trayicon.py <path>.iconset` for install-mac.sh, `--hicolor <dir>` for
-    install.sh.
+    install.sh, `--ico <path>` for the Windows build.
 
     A QGuiApplication has to exist before a QPixmap can, and offscreen because
     this runs from a shell script with no window to open.
     """
-    hicolor = len(argv) == 3 and argv[1] == "--hicolor"
-    if not hicolor and len(argv) != 2:
+    flag = argv[1] if len(argv) == 3 else ""
+    if flag not in ("--hicolor", "--ico") and len(argv) != 2:
         print("usage: trayicon.py <directory>.iconset\n"
-              "       trayicon.py --hicolor <icon directory>", file=sys.stderr)
+              "       trayicon.py --hicolor <icon directory>\n"
+              "       trayicon.py --ico <path>.ico", file=sys.stderr)
         return 2
     from PyQt6.QtGui import QGuiApplication
     QGuiApplication.setAttribute(
         Qt.ApplicationAttribute.AA_UseSoftwareOpenGL, True)
     app = QGuiApplication(["dikte-icon", "-platform", "offscreen"])
     try:
-        if hicolor:
+        if flag == "--hicolor":
             for path in write_hicolor(argv[2]):
                 print(path)
+        elif flag == "--ico":
+            print(write_ico(argv[2]))
         else:
             print(write_iconset(argv[1]))
     finally:

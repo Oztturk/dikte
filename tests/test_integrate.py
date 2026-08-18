@@ -451,5 +451,74 @@ class MacOS(Home):
         self.assertIn("install-mac.sh", command.read_text())
 
 
+class Windows(unittest.TestCase):
+    """The half of the Windows install the setup program cannot do.
+
+    It writes the Start Menu entry, the command and the uninstaller as it runs,
+    and asks once whether Dikte should start at sign-in. Changing that answer
+    afterwards is what is left here, and the value is faked rather than the
+    registry, so that all of it is read on every platform the tests run on.
+    """
+
+    def setUp(self):
+        self.value = ""
+        for name, function in (("_run_entry", lambda: self.value),
+                               ("_write_run_entry", self._write),
+                               ("_delete_run_entry", self._delete)):
+            patch = mock.patch.object(integrate, name, function)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.installed = pathlib.Path(self.tmp.name).resolve()
+        self.app = self.installed / "Dikte.exe"
+        self.app.write_text("")
+
+    def _write(self, command):
+        self.value = command
+
+    def _delete(self):
+        there, self.value = bool(self.value), ""
+        return there
+
+    def install(self, force=False):
+        with Frozen(str(self.app), platform="win32"):
+            return integrate.install(force=force)
+
+    def remove(self):
+        with Frozen(str(self.app), platform="win32"):
+            return integrate.remove()
+
+    def test_the_windowed_executable_is_what_starts_at_sign_in(self):
+        """The console one is what the `dikte` command runs, and a sign-in that
+        started that would open a console window nobody asked for."""
+        with Frozen(str(self.installed / "dikte.exe"), platform="win32"):
+            self.assertEqual(integrate.target(), self.app)
+
+    def test_a_start_does_not_turn_it_on_for_somebody_who_said_no(self):
+        self.assertEqual(self.install(), [])
+        self.assertEqual(self.value, "")
+
+    def test_typing_it_turns_starting_at_sign_in_on(self):
+        self.assertEqual(len(self.install(force=True)), 1)
+        self.assertEqual(self.value, f'"{self.app}"')
+
+    def test_an_installation_that_moved_is_pointed_at_where_it_is_now(self):
+        self.value = '"D:\\Dikte\\Dikte.exe"'
+        self.assertEqual(len(self.install()), 1)
+        self.assertEqual(self.value, f'"{self.app}"')
+
+    def test_running_it_again_changes_nothing(self):
+        self.install(force=True)
+        self.assertEqual(self.install(), [])
+
+    def test_removing_stops_it_starting_and_says_so_once(self):
+        self.install(force=True)
+        self.assertEqual(len(self.remove()), 1)
+        self.assertEqual(self.value, "")
+        self.assertEqual(self.remove(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

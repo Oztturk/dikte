@@ -107,11 +107,16 @@ jobs:
         run: python -m unittest discover --verbose
 
       # What the Mac does for its installer, in the language this one is in.
-      # Parsing only: install.ps1 writes into the Start Menu and the user PATH.
-      - name: Check the installer parses
+      # Parsing only: install.ps1 writes into the Start Menu and the user PATH,
+      # and build-windows.ps1 downloads an ffmpeg and runs PyInstaller. The
+      # setup program itself is compiled by build.yml, on the pull requests
+      # that touch it.
+      - name: Check the installer and the build script parse
         shell: pwsh
         run: |
-          $problems = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            "$PWD/install.ps1", [ref]$null, [ref]$problems) > $null
-          if ($problems) { $problems; exit 1 }
+          foreach ($script in "install.ps1", "packaging/build-windows.ps1") {
+            $problems = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              "$PWD/$script", [ref]$null, [ref]$problems) > $null
+            if ($problems) { $problems; exit 1 }
+          }

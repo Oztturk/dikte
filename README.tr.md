@@ -23,15 +23,16 @@ Python standart kütüphanesi (3.11 veya üstü) ve PyQt6.
 
 ## Kurulum
 
-[Sürümler sayfasında](../../releases) bir AppImage, bir de her Mac mimarisi
-için birer disk imajı var. İkisi de ilk çalıştıklarında kendi menü girdisini,
-oturum açılışını ve `dikte` komutunu yazar, makinede zaten duran bir kuruluma
-dokunmazlar; `dikte integrate --remove` yazdıklarını geri alır. AppImage yine
-de aşağıdaki sistem paketlerini ister: ses sunucusu, pano ve klavye onlardan
-gelir. Disk imajı bir Apple sertifikasıyla imzalı değil, bu yüzden ilk açılış
-reddedilir, Sistem Ayarları → Gizlilik ve Güvenlik altından **Yine de Aç**
-demek gerekir; macOS her güncellemeden sonra mikrofonu ve Erişilebilirliği
-yeniden sorar, checkout'tan kurmak bundan kurtarır.
+[Sürümler sayfasında](../../releases) bir AppImage, her Mac mimarisi için
+birer disk imajı, bir de Windows kurulumu var. İlk ikisi ilk çalıştıklarında
+kendi menü girdisini, oturum açılışını ve `dikte` komutunu yazar, makinede
+zaten duran bir kuruluma dokunmazlar; `dikte integrate --remove` yazdıklarını
+geri alır. AppImage yine de aşağıdaki sistem paketlerini ister: ses sunucusu,
+pano ve klavye onlardan gelir. Disk imajı bir Apple sertifikasıyla imzalı
+değil, bu yüzden ilk açılış reddedilir, Sistem Ayarları → Gizlilik ve Güvenlik
+altından **Yine de Aç** demek gerekir; macOS her güncellemeden sonra mikrofonu
+ve Erişilebilirliği yeniden sorar, checkout'tan kurmak bundan kurtarır.
+Windows kurulumu yalnızca kendi hesabına kurar ve yanında bir ffmpeg taşır.
 
 ```sh
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
@@ -93,10 +94,11 @@ BlackHole veya Loopback gerekiyor (`brew install blackhole-2ch`); dikte için
 gerekmiyor.
 
 Windows da aynı şekilde çalışıyor, Dikte açıkken kombinasyonu sistemin kendi
-kısayol servisi üzerinden tutuyor: `winget install Gyan.FFmpeg`, `pip install
-PyQt6`, sonra `python -m dikte`; Başlat Menüsü girdisi ve `dikte` komutu için
-isteğe bağlı `install.ps1`. Orada toplantı kaydı henüz yok, ayrıntılar
-[Windows README](README.windows.md)'sinde.
+kısayol servisi üzerinden tutuyor. Sürümler sayfasındaki kurulum kaydın
+istediği ffmpeg'i de taşıyor ve yönetici istemiyor; checkout'tan ise `winget
+install Gyan.FFmpeg`, `pip install PyQt6`, sonra `python -m dikte`, Başlat
+Menüsü girdisi ve `dikte` komutu için de isteğe bağlı `install.ps1`. Orada
+toplantı kaydı henüz yok, ayrıntılar [Windows README](README.windows.md)'sinde.
 
 `install.sh` `dikte` komutunu, menü girdisini, oturum açılışında otomatik
 başlatmayı ve iki global kısayolu kurar; tuşları iki argümanı, argüman
@@ -217,9 +219,9 @@ Kısayollar sekmesi bağlanacak komutu gösterir.
 Aşağıdakilerin hepsi `dikte` paketinin içinde: `python3 -m dikte` bunu çalıştırır,
 içindeki `__main__.py` de her başlatıcının ve kısayolun adlandırdığı dosyadır.
 `scripts/` altında install-mac.sh, update.sh, uninstall.sh ve release.sh var;
-`packaging/` release.sh'ın attığı etiketin yayımladığı AppImage ile disk
-imajını derler; install.sh en üstte kalır, `tests/` içinde de her modülün bir
-dosyası.
+`packaging/` release.sh'ın attığı etiketin yayımladığı AppImage'i, disk imajını
+ve Windows kurulumunu derler; install.sh en üstte kalır, `tests/` içinde de her
+modülün bir dosyası.
 
 ```
 app.py            giriş noktası, tepsi simgesi, durum makinesi

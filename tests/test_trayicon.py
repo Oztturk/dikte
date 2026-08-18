@@ -7,6 +7,8 @@ test blends each icon onto a bar of its own and asks whether anything of it
 survives, once over black and once over white.
 """
 
+import pathlib
+import struct
 import sys
 import tempfile
 import unittest
@@ -149,6 +151,26 @@ class ApplicationIcon(DikteTest):
         icon = trayicon.app_icon()
         self.assertFalse(icon.isNull())
         self.assertIn(48, [size.width() for size in icon.availableSizes()])
+
+    def test_the_windows_icon_is_one_file_holding_every_size(self):
+        """Written by hand, so the header is what a test can be wrong about:
+        Windows reads the sizes out of the directory at the front rather than
+        out of the images, and a 256 is written there as a zero."""
+        with tempfile.TemporaryDirectory() as root:
+            path = trayicon.write_ico(pathlib.Path(root) / "Dikte.ico")
+            data = path.read_bytes()
+            reserved, kind, count = struct.unpack_from("<HHH", data)
+            self.assertEqual((reserved, kind), (0, 1))
+            self.assertEqual(count, len(trayicon.ICO_SIZES))
+            for index, size in enumerate(trayicon.ICO_SIZES):
+                with self.subTest(size=size):
+                    (width, height, _, _, _, _,
+                     length, offset) = struct.unpack_from("<BBBBHHII", data,
+                                                          6 + 16 * index)
+                    self.assertEqual((width, height), (size % 256, size % 256))
+                    image = QImage.fromData(data[offset:offset + length])
+                    self.assertEqual((image.width(), image.height()),
+                                     (size, size))
 
 
 if __name__ == "__main__":

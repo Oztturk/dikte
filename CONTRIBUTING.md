@@ -70,7 +70,7 @@ there can tell that apart from an empty device list, which only means the tool
 that lists them is not installed.
 
 The tests are split along the same line, and almost none of them are skipped.
-1084 of the 1147 run on any machine, including every line of the Wayland, X11,
+1094 of the 1157 run on any machine, including every line of the Wayland, X11,
 macOS and Windows backends: the programs are faked at `shutil.which`, the
 frameworks and system libraries at the one function that loads them
 (`paste._win_api`, `hotkey._win_input`). A test class says which system it is
@@ -89,9 +89,11 @@ class and subclassed by each of them.
 
 The 43 that do carry `@linux_only` are the ones that would need the real thing:
 the `/dev/input` listener, KDE's shortcut file, GNOME's gsettings. The 20 with
-`@posix_only` are `integrate.py`, the menu entry and the login item a downloaded
-build writes for itself: there are two downloads, an AppImage and a disk image,
-so that module has no Windows half for a Windows host to check. Mark a test
+`@posix_only` are the half of `integrate.py` that writes files, the menu entry
+and the login item a downloaded build puts down for itself, which want a home
+directory laid out the way those two systems lay one out. Its Windows half is
+one registry value, since the setup program there did the rest, and the three
+functions that read and write it are faked like anything else. Mark a test
 either way only when faking it would leave nothing to test. A test that quietly
 stops running on the platform you are porting to protects nothing.
 

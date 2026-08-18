@@ -24,15 +24,17 @@ library, 3.11 or newer, and PyQt6.
 
 ## Install
 
-The [releases page](../../releases) has an AppImage and a disk image per Mac
-architecture. Both write their own menu entry, login item and `dikte` command
-the first time they run, and stand aside for an installation already on the
-machine; `dikte integrate --remove` takes them back. The AppImage still wants
-the system packages below, for the sound server, the clipboard and the
-keyboard. The disk image is signed with no Apple certificate, so the first
-launch is refused until you press **Open Anyway** under System Settings →
-Privacy & Security, and macOS asks for the microphone and Accessibility again
-after each update; installing from a checkout is what avoids that.
+The [releases page](../../releases) has an AppImage, a disk image per Mac
+architecture and a Windows setup. The first two write their own menu entry,
+login item and `dikte` command the first time they run, and stand aside for an
+installation already on the machine; `dikte integrate --remove` takes them
+back. The AppImage still wants the system packages below, for the sound
+server, the clipboard and the keyboard. The disk image is signed with no Apple
+certificate, so the first launch is refused until you press **Open Anyway**
+under System Settings → Privacy & Security, and macOS asks for the microphone
+and Accessibility again after each update; installing from a checkout is what
+avoids that. The Windows setup installs for your account alone and carries an
+ffmpeg with it.
 
 ```sh
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
@@ -94,10 +96,12 @@ transcribe in the cloud. A meeting needs BlackHole or Loopback
 (`brew install blackhole-2ch`); dictation does not.
 
 Windows works the same way, holding the keys through the system's own hotkey
-service while Dikte runs: `winget install Gyan.FFmpeg`, `pip install PyQt6`,
-then `python -m dikte`, with an optional `install.ps1` for the Start Menu entry
-and the `dikte` command. Meetings are not supported there yet; the details are
-in the [Windows README](README.windows.md).
+service while Dikte runs. The setup on the releases page carries the ffmpeg
+recording needs and asks for no administrator; from a checkout it is `winget
+install Gyan.FFmpeg`, `pip install PyQt6`, then `python -m dikte`, with an
+optional `install.ps1` for the Start Menu entry and the `dikte` command.
+Meetings are not supported there yet; the details are in the
+[Windows README](README.windows.md).
 
 `install.sh` adds the `dikte` command, a menu entry, an autostart entry and the
 two global shortcuts, whose keys are its two arguments, or the ones already in
@@ -221,8 +225,9 @@ keys.
 Everything below is in the `dikte` package, which is what `python3 -m dikte`
 runs and what the `__main__.py` in it hands to every launcher and shortcut.
 `scripts/` holds install-mac.sh, update.sh, uninstall.sh and release.sh;
-`packaging/` builds the AppImage and the disk image that release.sh's tag
-publishes; install.sh stays at the top, and `tests/` has a file per module.
+`packaging/` builds the AppImage, the disk image and the Windows setup that
+release.sh's tag publishes; install.sh stays at the top, and `tests/` has a
+file per module.
 
 ```
 app.py            entry point, tray icon, state machine

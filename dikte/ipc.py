@@ -15,7 +15,9 @@ import sys
 
 from PyQt6.QtNetwork import QLocalSocket
 
-SERVER_NAME = "dikte-" + str(os.getuid())
+SERVER_NAME = "dikte-" + (
+    str(os.getuid()) if hasattr(os, "getuid")
+    else os.environ.get("USERNAME", "user"))
 
 # Long enough for a process that is already running to answer, short enough that
 # "nothing is running" is not a noticeable pause in front of a key press.

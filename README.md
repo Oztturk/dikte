@@ -5,10 +5,10 @@ machine by default, a model cleans it up (dropping the *uh*s, the restarts, the
 missing punctuation), and the result lands in your clipboard and is pasted into
 whatever window you were typing in.
 
-Built for KDE Plasma 6 on Wayland, and runs on GNOME X11, macOS and any other
-Linux desktop that will let it read the keyboard. No
-dependencies beyond system packages: just the Python standard library, 3.11 or
-newer, and PyQt6.
+Built for KDE Plasma 6 on Wayland, and runs on GNOME X11, macOS,
+[Windows](README.windows.md) and any other Linux desktop that will let it read
+the keyboard. No dependencies beyond system packages: just the Python standard
+library, 3.11 or newer, and PyQt6.
 
 *[Türkçe README](README.tr.md)*
 
@@ -92,6 +92,12 @@ Dikte talks to. Build it (`cmake -B build -DWHISPER_BUILD_SERVER=ON
 -DGGML_METAL=ON && cmake --build build -j`) and give Settings → API the path, or
 transcribe in the cloud. A meeting needs BlackHole or Loopback
 (`brew install blackhole-2ch`); dictation does not.
+
+Windows works the same way, holding the keys through the system's own hotkey
+service while Dikte runs: `winget install Gyan.FFmpeg`, `pip install PyQt6`,
+then `python -m dikte`, with an optional `install.ps1` for the Start Menu entry
+and the `dikte` command. Meetings are not supported there yet; the details are
+in the [Windows README](README.windows.md).
 
 `install.sh` adds the `dikte` command, a menu entry, an autostart entry and the
 two global shortcuts, whose keys are its two arguments, or the ones already in

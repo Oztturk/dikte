@@ -15,6 +15,7 @@ import json
 import os
 import signal
 import socket
+import subprocess
 import sys
 import threading
 
@@ -97,6 +98,9 @@ class Dikte:
         self.meeting_base = ""
         self.meeting_message = ""
         self.settings_window = None
+        # The single-instance server, handed over once run_app has opened it, so
+        # that a restart can stop answering before the replacement starts.
+        self.server = None
         self._quitting = False
         # A request that asked to be told how its run ended waits in here until
         # the run gets there, keyed by which of the three it was waiting on.
@@ -966,8 +970,29 @@ class Dikte:
         if self.settings_window is not None:
             self.settings_window.close()
         self.shutdown()
+        # Stop answering before the replacement is started, not just afterwards.
+        # execv leaves nothing behind to answer, but a Windows restart is two
+        # processes for a moment, and removeServer does nothing about a name
+        # another process is holding. The new one then either opens a second
+        # server on a name the old one is still answering on, so that a command
+        # arriving in that moment reaches the process that is going away, or
+        # fails to open one at all and says so to a console nobody is watching.
+        # Closing first leaves neither.
+        if self.server is not None:
+            self.server.close()
         QLocalServer.removeServer(SERVER_NAME)
         args = ipc.launcher() + ["--gui"]
+        if sys.platform == "win32":
+            # execv on Windows mangles arguments with spaces and leaves the two
+            # processes sharing a console; a detached start does neither.
+            subprocess.Popen(
+                args,
+                creationflags=(subprocess.DETACHED_PROCESS
+                               | subprocess.CREATE_NEW_PROCESS_GROUP),
+                close_fds=True,
+            )
+            QApplication.instance().quit()
+            return
         os.execv(args[0], args)
 
     def shutdown(self):
@@ -1038,7 +1063,11 @@ def install_signal_handlers(app):
         app.quit()          # aboutToQuit runs shutdown()
 
     notifier.activated.connect(woken)
-    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    # SIGHUP does not exist on Windows, and neither does a session to hang up.
+    signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGHUP"):
+        signals.append(signal.SIGHUP)
+    for sig in signals:
         # A handler that does nothing, so that the default action, stopping the
         # process where it stands, is replaced by the wakeup above.
         signal.signal(sig, lambda *_: None)
@@ -1128,6 +1157,7 @@ def run_app(args):
     QLocalServer.removeServer(SERVER_NAME)
     if not server.listen(SERVER_NAME):
         print(f"dikte: could not open the IPC socket: {server.errorString()}")
+    dikte.server = server
 
     def on_connection():
         conn = server.nextPendingConnection()

@@ -16,9 +16,12 @@ from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from dikte import audio
 from dikte import cleanup
 from dikte import config as cfg
+from dikte import ggml
 from dikte import hotkey
+from dikte import ipc
 from dikte import overlay as overlay_module
 from dikte import paste
 from dikte import settings_ui
@@ -281,7 +284,7 @@ class Settings(DikteTest):
         text = self.shortcut_tab_text(window)
         self.assertIn("i3 keeps no shortcut registry", text)
         self.assertNotIn("KWin", text)
-        self.assertIn("__main__.py toggle", text)
+        self.assertIn(ipc.command_for("toggle"), text)
         # Not a choice to offer where it is the only mechanism there is.
         self.assertTrue(window.evdev_enabled.isHidden())
         self.assertFalse([button for button in
@@ -458,7 +461,7 @@ class MacSettings(Settings):
         text = self.shortcut_tab_text(window)
         self.assertIn("Dikte asks macOS for these combinations", text)
         self.assertNotIn("KWin", text)
-        self.assertNotIn("__main__.py toggle", text)
+        self.assertNotIn(ipc.command_for("toggle"), text)
 
     def test_the_paste_keys_on_offer_are_the_ones_a_mac_uses(self):
         window = self.window(cfg.Config())
@@ -482,7 +485,7 @@ class KdeSettings(Settings):
         self.assertIn("KWin only reads shortcut settings at startup", text)
         self.assertIn("Install as a KDE shortcut", text)
         self.assertNotIn("keeps no shortcut registry", text)
-        self.assertNotIn("__main__.py toggle", text)
+        self.assertNotIn(ipc.command_for("toggle"), text)
         # Here it is a choice: the wait for the next login, or the key press
         # reaching the focused application as well.
         self.assertFalse(window.evdev_enabled.isHidden())
@@ -610,12 +613,49 @@ class Overlay(DikteTest):
         self.assertFalse(widget.muted)
 
 
+class MeetingSources(DikteTest):
+    """What the Meeting tab says about the far side, per sound system.
+
+    The box that picks it is empty on a system that cannot record it, and an
+    empty box with nothing next to it reads as a list that has not loaded yet.
+    """
+
+    def notes(self, meetings):
+        with mock.patch.object(audio, "sound",
+                               return_value=audio.PULSE._replace(
+                                   meetings=meetings)), \
+                only_these_tools(), \
+                mock.patch.object(settings_ui.SettingsWindow, "_load_models"), \
+                mock.patch.object(settings_ui.SettingsWindow,
+                                  "_load_transcribe_models"):
+            window = settings_ui.SettingsWindow(cfg.Config())
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(window.close)
+        return " ".join(label.text()
+                        for label in window.findChildren(settings_ui.QLabel))
+
+    def test_a_system_that_cannot_record_the_far_side_says_so(self):
+        self.assertIn("nothing that records what the speakers",
+                      self.notes(meetings=False))
+
+    def test_a_system_that_can_says_nothing_of_the_sort(self):
+        self.assertNotIn("nothing that records what the speakers",
+                         self.notes(meetings=True))
+
+
 if __name__ == "__main__":
     unittest.main()
 
 
 class LocalModels(DikteTest):
     """The download boxes, without a network and without either program."""
+
+    def setUp(self):
+        super().setUp()
+        # A machine Dikte is actually installed on would otherwise answer the
+        # "nothing can transcribe" question from its real binary and model.
+        self.patch_attr(ggml, "BIN_DIR", self.path("bin"))
+        self.patch_attr(ggml, "MODELS_DIR", self.path("models"))
 
     def window(self, conf):
         window = settings_ui.SettingsWindow(conf)

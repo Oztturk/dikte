@@ -40,6 +40,18 @@ linux_only = unittest.skipUnless(
     "covers the Linux desktop stack (PipeWire, wl-clipboard, ydotool, KDE)",
 )
 
+# The launchers a downloaded build writes for itself. There are two downloads,
+# an AppImage and a disk image, so `integrate` has a Linux half and a macOS half
+# and no third one, and the tests that pin them stand in a home laid out the way
+# those two systems lay one out: paths that start at the root, a $HOME the
+# library reads, a symlink for the command. None of that is a Windows machine,
+# where the same code never runs. A Windows build would add an entry there and
+# take the mark off these.
+posix_only = unittest.skipIf(
+    sys.platform == "win32",
+    "covers what an AppImage and a .app write into the desktop they landed on",
+)
+
 
 def _no_network(*args, **kwargs):
     raise AssertionError(

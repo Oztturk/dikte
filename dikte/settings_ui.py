@@ -1100,6 +1100,18 @@ class SettingsWindow(QDialog):
             ))
             mac_note.setWordWrap(True)
             sources_form.addRow(mac_note)
+        elif not audio.sound().meetings:
+            # Windows is the system this is written for: it offers nothing that
+            # captures what the speakers are playing, and there is no driver to
+            # install that would put an entry in the list above. Left unsaid,
+            # the box is simply empty and the Record button fails at the press.
+            nothing_note = QLabel(t(
+                "This system offers nothing that records what the speakers are "
+                "playing, so a meeting cannot be recorded on it. Dictation and "
+                "transcribing a file are unaffected."
+            ))
+            nothing_note.setWordWrap(True)
+            sources_form.addRow(nothing_note)
 
         note = QLabel(t(
             "Wear headphones if you can. Through speakers your microphone hears "
@@ -1366,6 +1378,12 @@ class SettingsWindow(QDialog):
         elif hotkey.backend() == hotkey.MACOS:
             explanation = t(
                 "Dikte asks macOS for these combinations itself, while it is "
+                "running. Nothing is installed, and no other application receives "
+                "them in the meantime."
+            )
+        elif hotkey.backend() == hotkey.WINDOWS:
+            explanation = t(
+                "Dikte asks Windows for these combinations itself, while it is "
                 "running. Nothing is installed, and no other application receives "
                 "them in the meantime."
             )

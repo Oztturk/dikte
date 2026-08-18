@@ -16,7 +16,8 @@ import pathlib
 import sys
 
 
-def _xdg(var, default):
+def _env(var, default):
+    """The directory a variable names, or the one it stands in for."""
     return pathlib.Path(os.environ.get(var) or os.path.expanduser(default))
 
 
@@ -24,13 +25,20 @@ def directories(platform=None):
     """(settings, data), in the two places this system keeps them.
 
     macOS keeps both in the one directory a Mac user's backup already knows
-    about. Everywhere else they are separate and follow the XDG variables.
+    about. Windows keeps them apart on purpose: settings roam with the account,
+    and several gigabytes of models are exactly what a roaming profile must not
+    carry. Everywhere else they are separate and follow the XDG variables.
     """
-    if (platform or sys.platform) == "darwin":
+    here = platform or sys.platform
+    if here == "darwin":
         support = pathlib.Path.home() / "Library/Application Support/Dikte"
         return support, support
-    return (_xdg("XDG_CONFIG_HOME", "~/.config") / "dikte",
-            _xdg("XDG_DATA_HOME", "~/.local/share") / "dikte")
+    if here == "win32":
+        roaming = _env("APPDATA", "~/AppData/Roaming")
+        local = _env("LOCALAPPDATA", "~/AppData/Local")
+        return roaming / "Dikte", local / "Dikte"
+    return (_env("XDG_CONFIG_HOME", "~/.config") / "dikte",
+            _env("XDG_DATA_HOME", "~/.local/share") / "dikte")
 
 
 CONFIG_DIR, DATA_DIR = directories()

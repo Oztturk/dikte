@@ -283,6 +283,7 @@ def _ffmpeg(args, out, aborter=None):
         ["ffmpeg", "-nostdin", "-y", *args],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     # A two hour film is a minute of ffmpeg, which is a minute of a Stop button
     # doing nothing unless the abort reaches the process itself.

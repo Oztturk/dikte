@@ -77,3 +77,41 @@ jobs:
           bash -n scripts/release.sh
           bash -n packaging/build-appimage.sh
           bash -n packaging/build-dmg.sh
+
+  # The same job again for the same reason. The Windows backends are faked at
+  # the one function that loads user32 and kernel32, so every line of them is
+  # already read on the Linux above; what only this job can catch is the half
+  # that reads the real system. %APPDATA% and %LOCALAPPDATA% have to be the
+  # directories Windows actually hands out, a path spelled with a backslash has
+  # to be one the tests can still read, and the config-permission test has to
+  # skip rather than fail on a file system that decides by ACL.
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      # No apt step: PyQt6's wheel carries the Qt DLLs it needs on Windows.
+      - name: Install PyQt6
+        run: python -m pip install --quiet PyQt6
+
+      - name: Run the tests
+        run: python -m unittest discover --verbose
+
+      # What the Mac does for its installer, in the language this one is in.
+      # Parsing only: install.ps1 writes into the Start Menu and the user PATH.
+      - name: Check the installer parses
+        shell: pwsh
+        run: |
+          $problems = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/install.ps1", [ref]$null, [ref]$problems) > $null
+          if ($problems) { $problems; exit 1 }

@@ -2,9 +2,13 @@
 
 import contextlib
 import os
+import queue
 import subprocess
+import time
 import unittest
 from unittest import mock
+
+from PyQt6.QtCore import Qt
 
 from dikte import config as cfg
 from dikte import hotkey
@@ -751,6 +755,205 @@ class MacChooser(DikteTest):
         with mock.patch.object(hotkey.sys, "platform", "linux"):
             self.assertTrue(hotkey.valid_shortcut("Ctrl+F1"))
             self.assertFalse(hotkey.valid_shortcut("Cmd+Space"))
+
+
+# --- Windows ----------------------------------------------------------------
+
+class ParseWindowsShortcut(unittest.TestCase):
+    def test_the_default(self):
+        self.assertEqual(hotkey.parse_windows_shortcut("Ctrl+Space"),
+                         (hotkey.WIN_MODS["ctrl"], 0x20))
+
+    def test_case_and_spacing_do_not_matter(self):
+        self.assertEqual(hotkey.parse_windows_shortcut(" ctrl + SPACE "),
+                         hotkey.parse_windows_shortcut("Ctrl+Space"))
+
+    def test_several_modifiers_are_one_number(self):
+        modifiers, key = hotkey.parse_windows_shortcut("Ctrl+Shift+M")
+        self.assertEqual(modifiers,
+                         hotkey.WIN_MODS["ctrl"] | hotkey.WIN_MODS["shift"])
+        self.assertEqual(key, hotkey.WIN_KEYS["m"])
+
+    def test_the_synonyms_land_on_one_number(self):
+        for name in ("meta", "super", "win"):
+            with self.subTest(name=name):
+                self.assertEqual(hotkey.parse_windows_shortcut(f"{name}+space"),
+                                 (hotkey.WIN_MODS["win"], 0x20))
+        self.assertEqual(hotkey.parse_windows_shortcut("Control+Space"),
+                         hotkey.parse_windows_shortcut("Ctrl+Space"))
+
+    def test_a_key_on_its_own(self):
+        self.assertEqual(hotkey.parse_windows_shortcut("F9"),
+                         (0, hotkey.WIN_KEYS["f9"]))
+
+    def test_modifiers_with_no_key(self):
+        self.assertEqual(hotkey.parse_windows_shortcut("Ctrl+Alt"), (None, None))
+
+    def test_a_key_nobody_mapped(self):
+        self.assertEqual(hotkey.parse_windows_shortcut("Ctrl+F13"), (None, None))
+
+    def test_something_that_is_not_even_a_string(self):
+        self.assertEqual(hotkey.parse_windows_shortcut(None), (None, None))
+
+
+class FakeWinHotkeys:
+    """user32 and kernel32, as much of both as the listener calls.
+
+    The message queue is a real queue: GetMessageW blocks on it the way the
+    real one blocks on the thread's, so the listener runs its actual loop and
+    a test presses the key by posting the message a press would.
+    """
+
+    def __init__(self):
+        self.registered = {}    # identifier -> (modifiers, key)
+        self.refused = set()    # (modifiers, key) another program holds
+        self.unregistered = []
+        self.queue = queue.Queue()
+
+    # --- user32
+    def RegisterHotKey(self, hwnd, identifier, modifiers, key):
+        if (modifiers & ~hotkey.WIN_MOD_NOREPEAT, key) in self.refused:
+            return 0
+        self.registered[identifier] = (modifiers, key)
+        return 1
+
+    def UnregisterHotKey(self, hwnd, identifier):
+        self.unregistered.append(identifier)
+        self.registered.pop(identifier, None)
+        return 1
+
+    def PeekMessageW(self, reference, hwnd, low, high, remove):
+        return 0
+
+    def GetMessageW(self, reference, hwnd, low, high):
+        kind, wparam = self.queue.get()
+        if kind == hotkey.WM_QUIT:
+            return 0
+        message = reference._obj
+        message.message = kind
+        message.wParam = wparam
+        return 1
+
+    def PostThreadMessageW(self, thread_id, message, wparam, lparam):
+        self.queue.put((message, wparam))
+        return 1
+
+    # --- kernel32
+    def GetCurrentThreadId(self):
+        return 1
+
+    # --- the keyboard
+    def press(self, identifier):
+        self.queue.put((hotkey.WM_HOTKEY, identifier))
+
+
+class WinListener(DikteTest):
+    """What the listener asks Windows for, without a Windows to ask."""
+
+    def setUp(self):
+        super().setUp()
+        self.api = FakeWinHotkeys()
+        self.patch_attr(hotkey, "_win_input", lambda: (self.api, self.api))
+        self.addCleanup(hotkey._REGISTERED.clear)
+        self.listener = hotkey.WinHotkey()
+        self.addCleanup(self.listener.stop)
+        self.failures = []
+        # Direct, because the emits come from the listener's own thread and
+        # there is no event loop here to carry a queued one across.
+        self.listener.failed.connect(self.failures.append,
+                                     Qt.ConnectionType.DirectConnection)
+
+    @staticmethod
+    def settles(seen, count=1):
+        """The signals arrive from the listener's own thread, not this one."""
+        deadline = time.monotonic() + 2
+        while len(seen) < count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return seen
+
+    def test_every_binding_is_registered_with_its_modifiers(self):
+        self.assertTrue(self.listener.start({"toggle": "Ctrl+Space",
+                                             "cancel": "Ctrl+Shift+Space"}))
+        norepeat = hotkey.WIN_MOD_NOREPEAT
+        self.assertEqual(self.api.registered, {
+            1: (hotkey.WIN_MODS["ctrl"] | norepeat, 0x20),
+            2: (hotkey.WIN_MODS["ctrl"] | hotkey.WIN_MODS["shift"] | norepeat, 0x20),
+        })
+
+    def test_what_landed_is_what_the_status_line_shows(self):
+        self.listener.start({"toggle": "Ctrl+Space"})
+        self.assertEqual(hotkey._REGISTERED,
+                         {hotkey.DESKTOP_ID: "Ctrl+Space"})
+
+    def test_a_press_arrives_under_the_name_it_was_registered_as(self):
+        seen = []
+        self.listener.triggered.connect(seen.append,
+                                        Qt.ConnectionType.DirectConnection)
+        self.listener.start({"toggle": "Ctrl+Space", "cancel": "Ctrl+Shift+Space"})
+        self.api.press(2)
+        self.assertEqual(self.settles(seen), ["cancel"])
+
+    def test_a_held_combination_is_reported_and_the_rest_still_land(self):
+        self.api.refused = {(hotkey.WIN_MODS["ctrl"], 0x20)}
+        started = self.listener.start({"toggle": "Ctrl+Space",
+                                       "cancel": "Ctrl+Shift+Space"})
+        self.assertTrue(started)
+        self.assertIn("Ctrl+Space", self.settles(self.failures)[0])
+        self.assertEqual(list(self.api.registered), [2])
+
+    def test_an_unparsable_binding_is_reported(self):
+        self.assertFalse(self.listener.start({"toggle": "Ctrl+F13"}))
+        self.assertIn("Ctrl+F13", self.failures[0])
+
+    def test_nothing_but_empty_bindings_does_not_start(self):
+        self.assertFalse(self.listener.start({"toggle": "", "cancel": ""}))
+        self.assertFalse(self.listener.running)
+
+    def test_stop_lets_go_of_everything(self):
+        self.listener.start({"toggle": "Ctrl+Space", "cancel": "Ctrl+Shift+Space"})
+        self.listener.stop()
+        self.assertEqual(self.api.registered, {})
+        self.assertEqual(hotkey._REGISTERED, {})
+        self.assertFalse(self.listener.running)
+
+    def test_a_second_start_is_a_clean_slate(self):
+        self.listener.start({"toggle": "Ctrl+Space"})
+        self.assertTrue(self.listener.start({"toggle": "Ctrl+Shift+Space"}))
+        self.assertEqual(self.api.registered,
+                         {1: (hotkey.WIN_MODS["ctrl"] | hotkey.WIN_MODS["shift"]
+                              | hotkey.WIN_MOD_NOREPEAT, 0x20)})
+
+
+class WindowsChooser(DikteTest):
+    def setUp(self):
+        super().setUp()
+        self.enterContext(mock.patch.object(hotkey.sys, "platform", "win32"))
+        self.addCleanup(hotkey._REGISTERED.clear)
+
+    def test_the_listener_is_the_windows_hotkey_service(self):
+        self.assertIsInstance(hotkey.listener(), hotkey.WinHotkey)
+
+    def test_a_combination_is_checked_against_the_windows_table(self):
+        self.assertTrue(hotkey.valid_shortcut("Ctrl+Space"))
+        self.assertFalse(hotkey.valid_shortcut("Ctrl+F13"))
+
+    def test_no_registry_to_write_into_and_no_restart_to_wait_for(self):
+        self.assertFalse(hotkey.installs_shortcuts())
+        self.assertFalse(hotkey.shortcut_needs_restart())
+        self.assertEqual(hotkey.desktop_name(), "Windows")
+
+    def test_installing_records_it_rather_than_writing_anything(self):
+        with mock.patch.object(hotkey.subprocess, "run") as run:
+            ok, message = hotkey.install_shortcut("Ctrl+Space", "dikte toggle")
+        run.assert_not_called()
+        self.assertTrue(ok)
+        self.assertEqual(hotkey.shortcut_status(), "Ctrl+Space")
+        hotkey.remove_shortcut()
+        self.assertIsNone(hotkey.shortcut_status())
+
+    def test_no_list_of_conflicts_to_read(self):
+        """Not even KDE's file, which a dual-boot home directory could hold."""
+        self.assertEqual(hotkey.conflicting_shortcuts("Ctrl+Space"), [])
 
 
 if __name__ == "__main__":

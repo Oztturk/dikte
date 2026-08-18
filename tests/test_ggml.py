@@ -15,6 +15,7 @@ import tarfile
 import textwrap
 import threading
 import time
+import zipfile
 from unittest import mock
 
 from dikte import ggml
@@ -74,6 +75,15 @@ def tarball(entries):
             info.size = len(content)
             info.mode = 0o755
             tar.addfile(info, io.BytesIO(content))
+    return buf.getvalue()
+
+
+def zipball(entries):
+    """A .zip laid out the way the Windows releases are."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as bundle:
+        for name, content in entries.items():
+            bundle.writestr(name, content)
     return buf.getvalue()
 
 
@@ -691,3 +701,87 @@ class Sizes(DikteTest):
         self.assertEqual(ggml.human_size(512), "512 B")
         self.assertEqual(ggml.human_size(574041195), "547.4 MB")
         self.assertEqual(ggml.human_size(3_095_033_483), "2.9 GB")
+
+
+# --- Windows ----------------------------------------------------------------
+
+
+class WindowsAssets(Local):
+    """Which archive a Windows machine is handed."""
+
+    def setUp(self):
+        super().setUp()
+        self.patch_attr(sys, "platform", "win32")
+        self.patch_attr(ggml, "_arch", lambda: "x64")
+
+    def test_whisper_prefers_the_blas_build(self):
+        # On a plain CPU it transcribes about twice as fast as the stock one.
+        self.assertEqual(ggml._wanted_assets(ggml.WHISPER),
+                         ("whisper-blas-bin-x64.zip", "whisper-bin-x64.zip"))
+
+    def test_llama_takes_the_vulkan_build_when_there_is_a_loader(self):
+        self.patch_attr(ggml, "_has_vulkan", lambda: True)
+        self.assertEqual(ggml._wanted_assets(ggml.LLAMA),
+                         ("bin-win-vulkan-x64.zip", "bin-win-cpu-x64.zip"))
+
+    def test_llama_falls_back_to_the_cpu_build_without_one(self):
+        self.patch_attr(ggml, "_has_vulkan", lambda: False)
+        self.assertEqual(ggml._wanted_assets(ggml.LLAMA),
+                         ("bin-win-cpu-x64.zip",))
+
+    def test_an_arm_machine_is_not_handed_the_x64_build(self):
+        self.patch_attr(ggml, "_arch", lambda: "arm64")
+        self.patch_attr(ggml, "_has_vulkan", lambda: True)
+        self.assertEqual(ggml._wanted_assets(ggml.LLAMA),
+                         ("bin-win-cpu-arm64.zip",))
+
+    def test_an_arm_machine_is_handed_the_x64_whisper_anyway(self):
+        """whisper.cpp publishes no arm64 build for Windows: the release has
+        Win32 and x64 and nothing else, so emulated is the only local option
+        a Snapdragon has. Pinned here so that a release which does start
+        publishing one is noticed rather than quietly ignored."""
+        self.patch_attr(ggml, "_arch", lambda: "arm64")
+        self.assertEqual(ggml._wanted_assets(ggml.WHISPER),
+                         ("whisper-blas-bin-x64.zip", "whisper-bin-x64.zip"))
+
+
+class InstallOnWindows(Local):
+    """The Windows releases are zips, and the binary carries .exe."""
+
+    def setUp(self):
+        super().setUp()
+        self.patch_attr(sys, "platform", "win32")
+        self.patch_attr(ggml, "_arch", lambda: "x64")
+        self.archive = zipball({
+            "Release/whisper-server.exe": b"MZ not really a program",
+            "Release/whisper.dll": b"not really a library",
+        })
+
+    def release(self, *names):
+        digest = hashlib.sha256(self.archive)
+        return {"tag_name": "v1.9.1", "assets": [
+            {"name": name, "browser_download_url": f"https://example.invalid/{name}",
+             "size": 10, "digest": "sha256:" + digest.hexdigest()}
+            for name in names]}
+
+    def test_the_zip_lands_and_the_exe_inside_it_is_found(self):
+        with serving(self.release("whisper-blas-bin-x64.zip"), self.archive):
+            path = ggml.install_program(ggml.WHISPER)
+        self.assertTrue(path.endswith("whisper-server.exe"))
+        self.assertTrue(os.path.isfile(path))
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(path),
+                                                    "whisper.dll")))
+        self.assertEqual(ggml.installed_program(ggml.WHISPER), path)
+
+    def test_the_blas_build_is_the_one_fetched_when_both_are_offered(self):
+        listing = self.release("whisper-bin-x64.zip", "whisper-blas-bin-x64.zip")
+        with serving(listing, self.archive) as calls:
+            ggml.install_program(ggml.WHISPER)
+        urls = [call.args[0].full_url for call in calls.call_args_list]
+        self.assertTrue(urls[1].endswith("whisper-blas-bin-x64.zip"))
+
+    def test_a_release_with_nothing_for_windows_says_so(self):
+        with fake_urlopen(json_body(self.release("whisper-bin-ubuntu-x64.tar.gz"))):
+            with self.assertRaises(ggml.LocalError) as caught:
+                ggml.install_program(ggml.WHISPER)
+        self.assertIn("this machine", str(caught.exception))

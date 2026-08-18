@@ -109,6 +109,10 @@ TR = {
         "Ses kayıt aracı bulunamadı. pulseaudio-utils ya da pipewire-audio kur.",
     "ffmpeg not found. Install it with: brew install ffmpeg":
         "ffmpeg bulunamadı. Şununla kur: brew install ffmpeg",
+    "ffmpeg or a microphone was not found. Install ffmpeg with: "
+    "winget install Gyan.FFmpeg":
+        "ffmpeg ya da bir mikrofon bulunamadı. ffmpeg'i şununla kur: "
+        "winget install Gyan.FFmpeg",
     "Audio recorder stopped before receiving sound: {error}":
         "Ses kayıt aracı veri alamadan kapandı: {error}",
     "Could not copy to clipboard: {error}": "Panoya kopyalanamadı: {error}",
@@ -353,6 +357,11 @@ TR = {
     "meantime.":
         "Dikte bu kombinasyonları çalışırken macOS'tan kendisi ister. Hiçbir şey "
         "kurulmaz ve o sırada başka hiçbir uygulama bu tuşları almaz.",
+    "Dikte asks Windows for these combinations itself, while it is running. "
+    "Nothing is installed, and no other application receives them in the "
+    "meantime.":
+        "Dikte bu kombinasyonları çalışırken Windows'tan kendisi ister. Hiçbir şey "
+        "kurulmaz ve o sırada başka hiçbir uygulama bu tuşları almaz.",
     "{desktop} keeps no shortcut registry, so Dikte listens for these "
     "combinations itself while it is running. Your user has to be able to read "
     "/dev/input for that, and the focused application receives the keys as "
@@ -391,6 +400,12 @@ TR = {
         "macOS kısayol servisine ulaşılamadı: {error}",
     "macOS would not give Dikte {shortcut}; another application already holds it.":
         "macOS {shortcut} kombinasyonunu Dikte'ye vermedi; başka bir uygulama "
+        "onu şimdiden tutuyor.",
+    "Could not reach the Windows shortcut service: {error}":
+        "Windows kısayol servisine ulaşılamadı: {error}",
+    "Windows would not give Dikte {shortcut}; another application already "
+    "holds it.":
+        "Windows {shortcut} kombinasyonunu Dikte'ye vermedi; başka bir uygulama "
         "onu şimdiden tutuyor.",
     "Cannot read /dev/input. Your user needs to be in the 'input' group:\n"
     "  sudo usermod -aG input $USER   (then log out and back in)":
@@ -643,6 +658,16 @@ TR = {
         "macOS, hoparlörden çıkan sesi kaydedilebilir bir kaynak olarak sunmaz. "
         "BlackHole ya da Loopback kur, toplantının sesini oradan geçir ve "
         "yukarıdan onu seç.",
+    "This system offers nothing that records what the speakers are playing, "
+    "so a meeting cannot be recorded on it. Dictation and transcribing a file "
+    "are unaffected.":
+        "Bu sistem, hoparlörden çıkan sesi kaydeden hiçbir şey sunmuyor; "
+        "burada toplantı kaydedilemez. Dikte ve dosya deşifresi bundan "
+        "etkilenmez.",
+    "This system offers nothing that records what the speakers are playing, "
+    "so a meeting cannot be recorded on it.":
+        "Bu sistem, hoparlörden çıkan sesi kaydeden hiçbir şey sunmuyor; "
+        "burada toplantı kaydedilemez.",
     "Wear headphones if you can. Through speakers your microphone hears the "
     "other side as well, and although a line that lands on both channels at "
     "once is dropped again, the repair is never as clean as not needing it.":

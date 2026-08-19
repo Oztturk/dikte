@@ -24,10 +24,18 @@ jobs:
       # for the offscreen platform the tests run on. QtNetwork wants the Kerberos
       # library, and the widgets want fontconfig, whether or not anything is
       # ever drawn.
+      #
+      # A mirror that stops answering is what the retries and the timeout are
+      # for: apt waits on it by default, and a job waiting on apt sits there
+      # until the six hour limit rather than going red in a minute. The same
+      # two lines are in build.yml and release.yml, which install the same
+      # eight libraries.
       - name: Install the Qt runtime libraries
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=20"
+          sudo apt-get $apt update
+          sudo apt-get $apt install --no-install-recommends -y \
             libegl1 libgl1 libxkbcommon0 libdbus-1-3 libglib2.0-0 \
             libfontconfig1 libfreetype6 libgssapi-krb5-2
 

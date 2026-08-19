@@ -66,9 +66,11 @@ jobs:
       # the build draws its own icon before it packages anything.
       - name: Install the Qt runtime libraries
         if: runner.os == 'Linux'
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
+          apt="-o Acquire::Retries=3 -o Acquire::http::Timeout=20"
+          sudo apt-get $apt update
+          sudo apt-get $apt install --no-install-recommends -y \
             libegl1 libgl1 libxkbcommon0 libdbus-1-3 libglib2.0-0 \
             libfontconfig1 libfreetype6 libgssapi-krb5-2
 

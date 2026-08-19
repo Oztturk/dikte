@@ -15,6 +15,8 @@ import sys
 
 from PyQt6.QtNetwork import QLocalSocket
 
+from . import integrate
+
 SERVER_NAME = "dikte-" + (
     str(os.getuid()) if hasattr(os, "getuid")
     else os.environ.get("USERNAME", "user"))
@@ -43,9 +45,19 @@ def launcher():
     under a fresh /tmp path every run, so what a shortcut written today has to
     say is the .AppImage file the user keeps, not the binary inside this run's
     mount. APPIMAGE is what the runtime puts that path in.
+
+    The Windows build is two executables over one program, and the one to start
+    again is always the windowed one: `dikte toggle` typed at a terminal runs
+    the console one, and the application it leaves running should no more be
+    tied to that terminal than the one the Start Menu starts.
     """
     if not getattr(sys, "frozen", False):
         return [sys.executable, script_path()]
+    if sys.platform == "win32":
+        windowed = os.path.join(os.path.dirname(sys.executable),
+                                integrate.WINDOWS_APP)
+        if os.path.isfile(windowed):
+            return [windowed]
     return [os.environ.get("APPIMAGE") or sys.executable]
 
 

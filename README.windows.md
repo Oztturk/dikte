@@ -5,15 +5,27 @@ up and pasted where your cursor is.
 
 ## Requirements
 
-- **Windows 10/11**
+Windows 10 or 11. The setup on the [releases page](../../releases) carries
+everything else with it, and is x64, which an ARM machine runs emulated the way
+it runs whisper.cpp. A checkout wants:
+
 - **Python 3.11+** with **PyQt6** (`pip install PyQt6`; install.ps1 installs
   it when it is missing)
 - **ffmpeg** for microphone capture: `winget install Gyan.FFmpeg`
 
 ## Installing
 
-From a checkout: the releases page carries an AppImage and a disk image, and no
-Windows build yet.
+`Dikte-<version>-x64-setup.exe` from the releases page installs for your
+account alone, so no administrator is asked for, and puts down a Start Menu
+entry, a `dikte` command and, unless you untick it, a start at sign-in. It is
+signed with no certificate, so SmartScreen offers only **Don't run** until you
+press **More info**. Add/Remove Programs uninstalls it, and `dikte integrate`
+and `dikte integrate --remove` are the sign-in entry on its own, for changing
+your mind about that later. The `dikte` command is the same file install.ps1
+writes, so over a checkout the setup takes it over and uninstalling takes it
+away; run install.ps1 again to get the checkout's back.
+
+From a checkout instead:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File install.ps1

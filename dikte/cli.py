@@ -777,11 +777,14 @@ def cmd_integrate(opts):
 
     Run for you on every start, so this is for the two cases that start does
     not cover: undoing it, and repairing it from a terminal after the AppImage
-    was moved while Dikte was not running.
+    was moved while Dikte was not running. On Windows the setup program wrote
+    the rest, and what is left for this is the switch it could only offer while
+    it was on the screen: typing it starts Dikte at sign-in, --remove stops it.
     """
     if not integrate.packaged():
+        installer = "install.ps1" if sys.platform == "win32" else "./install.sh"
         return fail(opts, "this is a checkout, not a downloaded build; "
-                          "./install.sh writes those files here", 2)
+                          f"{installer} writes those files here", 2)
     try:
         # force, because typing this is asking for it outright, where the same
         # call on every start stands aside for an installation already there.
@@ -1088,7 +1091,8 @@ def build_parser():
     remove.set_defaults(func=cmd_shortcut)
 
     integrated = leaf(subs, "integrate",
-                      "menu entry, login item and command, for a downloaded build")
+                      "menu entry, start at sign-in and command, "
+                      "for a downloaded build")
     integrated.add_argument("--remove", action="store_true",
                             help="take them away again")
     integrated.set_defaults(func=cmd_integrate)

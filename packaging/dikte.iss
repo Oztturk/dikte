@@ -84,8 +84,8 @@ Filename: "{app}\Dikte.exe"; Description: "Start Dikte"; \
 { The `dikte` command. WindowsApps is already on the user's PATH, so a .cmd
   left there runs from any terminal without touching the PATH and without an
   administrator; the alternative is an environment variable edit that every
-  open terminal misses. It names the console executable, which is the one that
-  can print to the terminal it was typed in. }
+  open terminal misses. It names dikte-cli.exe, the console executable, which
+  is the one that can print to the terminal it was typed in. }
 
 function ShimDir(): String;
 begin
@@ -104,7 +104,7 @@ begin
   if CurStep = ssPostInstall then begin
     if DirExists(ShimDir()) then begin
       Shim := '@echo off' + #13#10
-            + '"' + ExpandConstant('{app}\dikte.exe') + '" %*' + #13#10;
+            + '"' + ExpandConstant('{app}\dikte-cli.exe') + '" %*' + #13#10;
       SaveStringToFile(ShimPath(), Shim, False);
     end;
   end;

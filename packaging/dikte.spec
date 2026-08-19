@@ -84,12 +84,17 @@ executable = EXE(                               # noqa: F821
 # print nothing to it and answer nothing to a script. Everywhere else the one
 # executable does both jobs: a terminal that started it keeps its output, and
 # nothing opens a window nobody asked for.
+#
+# Named apart from the windowed one rather than `dikte` beside `Dikte`.
+# Windows matches a filename without regard to its case, so those two are one
+# file in one directory: whichever PyInstaller writes second is the only one
+# installed, and a build made on a case-sensitive filesystem never sees it.
 console_executable = EXE(                       # noqa: F821
     archive,
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="dikte",
+    name="dikte-cli",
     console=True,
     target_arch=None,
     icon=os.environ.get("DIKTE_ICO") or None,

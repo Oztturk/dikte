@@ -9,6 +9,7 @@ has to notice AppImageLauncher's entry, which is not under the name ours is.
 import os
 import pathlib
 import plistlib
+import re
 import sys
 import tempfile
 import unittest
@@ -493,7 +494,7 @@ class Windows(unittest.TestCase):
     def test_the_windowed_executable_is_what_starts_at_sign_in(self):
         """The console one is what the `dikte` command runs, and a sign-in that
         started that would open a console window nobody asked for."""
-        with Frozen(str(self.installed / "dikte.exe"), platform="win32"):
+        with Frozen(str(self.installed / "dikte-cli.exe"), platform="win32"):
             self.assertEqual(integrate.target(), self.app)
 
     def test_a_start_does_not_turn_it_on_for_somebody_who_said_no(self):
@@ -518,6 +519,35 @@ class Windows(unittest.TestCase):
         self.assertEqual(len(self.remove()), 1)
         self.assertEqual(self.value, "")
         self.assertEqual(self.remove(), [])
+
+
+class WindowsExecutableNames(unittest.TestCase):
+    """The two Windows executables, read out of the files that name them.
+
+    Windows matches a filename without regard to its case, so Dikte.exe and
+    dikte.exe are one file in one directory and whichever was written second is
+    the only one installed. Nothing else here would catch that: these tests and
+    the builds that check the packaging both run on filesystems where the two
+    names are two files.
+    """
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    def executables(self):
+        """What the spec calls each one, in the order it builds them."""
+        spec = (self.root / "packaging" / "dikte.spec").read_text()
+        return [re.search(r'name="(.*?)"', block).group(1)
+                for block in spec.split("EXE(")[1:]]
+
+    def test_the_two_are_more_than_a_case_apart(self):
+        windowed, console = self.executables()
+        self.assertNotEqual(windowed.lower(), console.lower())
+
+    def test_the_command_runs_the_console_one(self):
+        """The setup writes the shim, so it is the setup that has to be right."""
+        console = self.executables()[1]
+        setup = (self.root / "packaging" / "dikte.iss").read_text()
+        self.assertIn(f"{{app}}\\{console}.exe", setup)
 
 
 if __name__ == "__main__":

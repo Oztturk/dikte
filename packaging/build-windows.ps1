@@ -45,12 +45,32 @@ $env:DIKTE_ICO = $icon
 
 # 2. The application --------------------------------------------------------
 # Two executables in the one directory: Dikte.exe, which is windowed and is
-# what a shortcut starts, and dikte.exe, which has a console and is what the
-# `dikte` command runs.
+# what a shortcut starts, and dikte-cli.exe, which has a console and is what
+# the `dikte` command runs. Their names differ by more than case on purpose;
+# Windows would otherwise keep one file for both.
 & python -m PyInstaller (Join-Path $root "packaging\dikte.spec") `
   --distpath (Join-Path $build "dist") --workpath (Join-Path $build "work") `
   --noconfirm --clean
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+
+# And the check that the two are really two. Windows matches a filename
+# without regard to its case, so a rename that leaves them a case apart puts
+# one file in the directory and whichever was written second is what both
+# names find. It cost a windowed build once, silently: the machines the
+# packaging is otherwise checked on all have case-sensitive filesystems, so
+# this only ever shows up here. Subsystem 2 is windowed, 3 is a console, and
+# it is the field the loader reads to decide which to give.
+function Get-PeSubsystem($path) {
+  $bytes = [System.IO.File]::ReadAllBytes($path)
+  $header = [BitConverter]::ToInt32($bytes, 0x3C)
+  return [BitConverter]::ToUInt16($bytes, $header + 0x5C)
+}
+foreach ($pair in @(@("Dikte.exe", 2), @("dikte-cli.exe", 3))) {
+  $subsystem = Get-PeSubsystem (Join-Path $dist $pair[0])
+  if ($subsystem -ne $pair[1]) {
+    throw "$($pair[0]) is subsystem $subsystem, expected $($pair[1]): the two executables collided"
+  }
+}
 
 # 3. ffmpeg -----------------------------------------------------------------
 # Recording on Windows goes through ffmpeg's DirectShow input, and Windows

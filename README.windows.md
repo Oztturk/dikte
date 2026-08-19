@@ -21,7 +21,9 @@ entry, a `dikte` command and, unless you untick it, a start at sign-in. It is
 signed with no certificate, so SmartScreen offers only **Don't run** until you
 press **More info**. Add/Remove Programs uninstalls it, and `dikte integrate`
 and `dikte integrate --remove` are the sign-in entry on its own, for changing
-your mind about that later.
+your mind about that later. The `dikte` command is the same file install.ps1
+writes, so over a checkout the setup takes it over and uninstalling takes it
+away; run install.ps1 again to get the checkout's back.
 
 From a checkout instead:
 

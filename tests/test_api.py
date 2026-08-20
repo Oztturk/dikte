@@ -79,6 +79,33 @@ class Explain(DikteTest):
     def test_the_status_is_carried_through(self):
         self.assertEqual(self.error(429).status, 429)
 
+    def test_so_is_whether_it_is_worth_asking_again(self):
+        self.assertTrue(self.error(502).retryable)
+        self.assertFalse(self.error(401).retryable)
+
+
+class Retryable(unittest.TestCase):
+    """Which failures a second try can fix, and which will fail the same way."""
+
+    def test_a_gateway_that_gave_up_waiting(self):
+        for status in (408, 429, 500, 502, 503, 504):
+            with self.subTest(status=status):
+                self.assertTrue(api.ApiError("x", status).retryable)
+
+    def test_a_request_that_was_wrong(self):
+        for status in (400, 401, 402, 403, 404, 413, 422):
+            with self.subTest(status=status):
+                self.assertFalse(api.ApiError("x", status).retryable)
+
+    def test_an_error_of_our_own_is_not_the_network(self):
+        self.assertFalse(api.ApiError("Transcript came back empty.").retryable)
+
+    def test_a_connection_that_dropped_is_worth_a_second_try(self):
+        with fake_urlopen(url_error("connection reset")):
+            with self.assertRaises(api.ApiError) as caught:
+                api._request("https://example.test", b"{}", {})
+        self.assertTrue(caught.exception.retryable)
+
 
 class ExtractError(unittest.TestCase):
     def test_the_usual_shape(self):

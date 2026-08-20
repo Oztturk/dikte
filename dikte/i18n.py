@@ -297,6 +297,10 @@ TR = {
     "Converting audio…": "Ses dönüştürülüyor…",
     "Splitting into {count} chunks…": "{count} parçaya bölünüyor…",
     "Transcribing chunk {index}/{count}…": "{index}/{count} parça yazıya çevriliyor…",
+    "{error} Trying again ({attempt}/{total})…":
+        "{error} Yeniden deneniyor ({attempt}/{total})…",
+    "{error} The transcript up to there is below.":
+        "{error} Oraya kadar çevrilen metin aşağıda.",
     "Done: {chars} characters.": "Bitti: {chars} karakter.",
     "Stopped.": "Durduruldu.",
     "Failed: {error}": "Başarısız: {error}",

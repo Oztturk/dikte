@@ -13,7 +13,15 @@ platform as an argument so that a test can stand on the other one.
 
 import os
 import pathlib
+import subprocess
 import sys
+
+# The one other platform constant every subprocess site needs, kept in this
+# leaf so no caller has to pull the audio stack in for it: console programs
+# started from a windowless process would otherwise each open a console window
+# of their own on Windows.
+NO_WINDOW = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
+             if sys.platform == "win32" else 0)
 
 
 def _env(var, default):

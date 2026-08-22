@@ -25,6 +25,7 @@ from dikte import ipc
 from dikte import overlay as overlay_module
 from dikte import paste
 from dikte import settings_ui
+from dikte import update
 from tests.support import DikteTest, only_these_tools
 
 # One application for the whole run; Qt allows no second one.
@@ -103,6 +104,7 @@ CHANGED = {
     "pause_shortcut": "Meta+P",
     "evdev_hotkey": True,
     "history_limit": 50,
+    "update_check": False,
 }
 
 
@@ -251,6 +253,31 @@ class Settings(DikteTest):
                          if not other.isHidden()]
                 self.assertEqual(shown, [provider])
                 self.assertFalse(box.isHidden())
+
+    def test_the_update_line_names_the_version_that_is_running(self):
+        window = self.window(cfg.Config())
+        self.assertIn(settings_ui.__version__, window.update_status.text())
+        # Nothing to open until a check has found something to open.
+        self.assertTrue(window.update_page.isHidden())
+
+    def test_a_newer_release_puts_the_page_button_on_screen(self):
+        window = self.window(cfg.Config())
+        told = []
+        window.update_found.connect(told.append)
+        release = update.Release("9.9.9", "https://example.invalid/9.9.9", "")
+        window._on_update_checked(release, "")
+        self.assertIn("9.9.9", window.update_status.text())
+        self.assertFalse(window.update_page.isHidden())
+        self.assertEqual(window._release_url, release.url)
+        # And the tray hears about it from here rather than waiting a day.
+        self.assertEqual(told, [release])
+
+    def test_a_check_that_failed_says_why_and_hands_the_button_back(self):
+        window = self.window(cfg.Config())
+        window.update_now.setEnabled(False)
+        window._on_update_checked(None, "api.github.com answered HTTP 403.")
+        self.assertIn("403", window.update_status.text())
+        self.assertTrue(window.update_now.isEnabled())
 
     def test_the_settings_the_window_does_not_show_are_left_alone(self):
         """A tab nobody wrote must not reset what the command line set."""

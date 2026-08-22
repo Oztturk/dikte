@@ -33,8 +33,9 @@ if sys.platform == "darwin":
                           os.environ.get("PATH", "")) if part
     )
 
-from PyQt6.QtCore import QTimer, QElapsedTimer, QSocketNotifier  # noqa: E402
-from PyQt6.QtGui import QAction, QIcon  # noqa: E402
+from PyQt6.QtCore import (QObject, QTimer, QElapsedTimer, QSocketNotifier,  # noqa: E402
+                          QUrl, pyqtSignal)
+from PyQt6.QtGui import QAction, QDesktopServices, QIcon  # noqa: E402
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon  # noqa: E402
 
@@ -44,11 +45,13 @@ from . import cli  # noqa: E402
 from . import config as cfg  # noqa: E402
 from . import ggml  # noqa: E402
 from . import hotkey  # noqa: E402
+from . import hub  # noqa: E402
 from . import i18n  # noqa: E402
 from . import integrate  # noqa: E402
 from . import ipc  # noqa: E402
 from . import meeting  # noqa: E402
 from . import trayicon  # noqa: E402
+from . import update  # noqa: E402
 from .i18n import t  # noqa: E402
 from .meeting import MeetingPipeline  # noqa: E402
 from .overlay import Overlay  # noqa: E402
@@ -76,6 +79,37 @@ ECHO_MS = 2000
 # both halves of the waveform move, which is the one check that matters, and
 # short enough not to sit in the corner for the rest of the hour.
 PEEK_MS = 12000
+
+# When the releases page is looked at, and how often it is thought about after
+# that. The delay is there so that a check never shares the first seconds of a
+# start with the model being loaded and the desktop drawing the tray; the
+# interval is not the interval between checks, which update.py holds at a day,
+# but how often that clock is read, so that a machine left running for a week
+# still asks once a day rather than once a boot.
+UPDATE_DELAY_MS = 20000
+UPDATE_POLL_MS = 3 * 3600 * 1000
+
+
+class UpdateCheck(QObject):
+    """One look at the releases page, off the interface thread.
+
+    An object of its own because the application is not one: a plain thread
+    cannot touch a widget, and a signal is the only way back onto the thread
+    that may.
+    """
+
+    # The newer release, or None when there is nothing to say, and the reason
+    # nothing could be found out instead.
+    done = pyqtSignal(object, str)
+
+    def start(self):
+        def work():
+            try:
+                self.done.emit(update.check(), "")
+            except hub.HubError as exc:
+                self.done.emit(None, str(exc))
+
+        threading.Thread(target=work, daemon=True).start()
 
 
 class Dikte:
@@ -159,6 +193,17 @@ class Dikte:
         self.meeting_ticker.setInterval(500)
         self.meeting_ticker.timeout.connect(self._meeting_tick)
 
+        # What the last check found, read from disk rather than asked for, so
+        # that a tray built in the next line already knows to say so.
+        self.update_release = update.pending()
+        self.updates = UpdateCheck()
+        self.updates.done.connect(self._on_update_checked)
+        self.update_ticker = QTimer()
+        self.update_ticker.setInterval(UPDATE_POLL_MS)
+        self.update_ticker.timeout.connect(self._look_for_update)
+        self.update_ticker.start()
+        QTimer.singleShot(UPDATE_DELAY_MS, self._look_for_update)
+
         self.tray = QSystemTrayIcon()
         self._apply_settings()
         self.tray.show()
@@ -211,6 +256,11 @@ class Dikte:
         self.menu.addAction(self.meeting_cancel_action)
         self.menu.addSeparator()
 
+        # Named in _refresh_update, and hidden until a check has found one.
+        self.update_action = QAction("", self.menu)
+        self.update_action.triggered.connect(self.open_release_page)
+        self.menu.addAction(self.update_action)
+
         self.settings_action = QAction(t("Settings…"), self.menu)
         self.settings_action.triggered.connect(self.open_settings)
         self.menu.addAction(self.settings_action)
@@ -227,6 +277,7 @@ class Dikte:
         self.tray.setContextMenu(self.menu)
         self.tray.setToolTip(t("Dikte: ready"))
         self.tray.activated.connect(self._tray_clicked)
+        self._refresh_update()
         self._set_icon("audio-input-microphone")
 
     def _tray_clicked(self, reason):
@@ -901,12 +952,58 @@ class Dikte:
         if len(message) > len(first_line):
             self.tray.showMessage("Dikte", message, QSystemTrayIcon.MessageIcon.Warning, 8000)
 
+    # ---- updates ----------------------------------------------------------
+
+    def _look_for_update(self):
+        """The timer. update.py decides whether this is a request or a memory."""
+        if not self.conf["update_check"]:
+            return
+        self.updates.start()
+
+    def _on_update_checked(self, release, error):
+        if error:
+            # Nobody asked for this, so nobody is waiting to be told it failed.
+            # A machine that is offline, or a GitHub that is rate-limiting the
+            # address, is not a thing to interrupt a dictation about.
+            print(f"dikte: update check: {error}", file=sys.stderr)
+            return
+        if release is None:
+            return
+        self._found_update(release)
+        # Once per version. A check that runs every day must not be a
+        # notification every day for an update somebody has decided to skip.
+        if update.announced() != release.version:
+            update.mark_announced(release.version)
+            self.tray.showMessage(
+                "Dikte",
+                t("Dikte {version} is out. The tray menu has the release page.",
+                  version=release.version),
+                QSystemTrayIcon.MessageIcon.Information, 8000,
+            )
+
+    def _found_update(self, release):
+        self.update_release = release
+        self._refresh_update()
+
+    def _refresh_update(self):
+        release = self.update_release
+        self.update_action.setVisible(release is not None)
+        if release is not None:
+            self.update_action.setText(
+                t("Dikte {version} is out…", version=release.version))
+
+    def open_release_page(self):
+        release = self.update_release
+        QDesktopServices.openUrl(
+            QUrl(release.url if release is not None else update.RELEASES_PAGE))
+
     # ---- settings ---------------------------------------------------------
 
     def open_settings(self):
         if self.settings_window is None:
             self.settings_window = SettingsWindow(self.conf, self.meetings)
             self.settings_window.applied.connect(self._apply_settings)
+            self.settings_window.update_found.connect(self._found_update)
             self.settings_window.finished.connect(self._settings_closed)
         self.settings_window.show()
         self.settings_window.raise_()

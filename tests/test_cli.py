@@ -10,6 +10,8 @@ import contextlib
 import io
 import json
 import unittest
+import webbrowser
+from typing import ClassVar
 from unittest import mock
 
 from dikte import audio
@@ -17,9 +19,11 @@ from dikte import cli
 from dikte import config as cfg
 from dikte import ggml
 from dikte import hotkey
+from dikte import hub
 from dikte import ipc
 from dikte import paste
-from tests.support import DikteTest, fake_urlopen, only_these_tools
+from dikte import update
+from tests.support import DikteTest, fake_urlopen, only_these_tools, url_error
 
 
 class Options:
@@ -418,6 +422,68 @@ class Providers(DikteTest):
         self.assertEqual(code, 1)
         self.assertIn("groq", out)
         self.assertIn("Groq", out)
+
+
+class Updates(DikteTest):
+    """`dikte update` looks, says what it found, and installs nothing."""
+
+    RELEASE: ClassVar[dict] = {
+        "tag_name": "v9.9.9",
+        "html_url": "https://github.com/yusufipk/dikte/releases/tag/v9.9.9",
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.patch_attr(hub, "CACHE_DIR", self.path("cache"))
+        # Nothing here may reach a browser, whatever the answer turns out to be.
+        self.opened = []
+        self.patch_attr(webbrowser, "open", self.opened.append)
+
+    def run_update(self, reply, **values):
+        with fake_urlopen(reply), captured() as (out, err):
+            code = cli.cmd_update(Options(open=False, **values))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_newer_release_is_named_with_its_page(self):
+        code, out, _ = self.run_update(self.RELEASE)
+        self.assertEqual(code, 0)
+        self.assertIn("9.9.9", out)
+        self.assertIn(self.RELEASE["html_url"], out)
+
+    def test_this_build_being_the_newest_is_not_a_failure(self):
+        code, out, _ = self.run_update({"tag_name": f"v{cli.__version__}"})
+        self.assertEqual(code, 0)
+        self.assertIn("newest", out)
+
+    def test_the_json_answer_says_both_numbers(self):
+        code, out, _ = self.run_update(self.RELEASE, json=True)
+        answer = json.loads(out)
+        self.assertTrue(answer["update"])
+        self.assertEqual(answer["latest"], "9.9.9")
+        self.assertEqual(answer["current"], cli.__version__)
+
+    def test_github_being_unreachable_is_a_failure_with_a_reason(self):
+        with fake_urlopen(url_error("no route to host")), captured() as (_, err):
+            code = cli.cmd_update(Options(open=False))
+        self.assertEqual(code, 1)
+        self.assertIn("api.github.com", err.getvalue())
+
+    def test_the_browser_is_opened_only_when_asked_and_only_when_there_is_one(self):
+        self.run_update(self.RELEASE)
+        self.assertEqual(self.opened, [])
+        with fake_urlopen({"tag_name": f"v{cli.__version__}"}), captured():
+            cli.cmd_update(Options(open=True))
+        self.assertEqual(self.opened, [])
+        with fake_urlopen(self.RELEASE), captured():
+            cli.cmd_update(Options(open=True))
+        self.assertEqual(self.opened, [self.RELEASE["html_url"]])
+
+    def test_the_answer_is_written_down_for_the_application(self):
+        """A check at a terminal is a check; the tray must not go and ask the
+        same question an hour later."""
+        self.run_update(self.RELEASE)
+        self.assertEqual(update.state()["version"], "9.9.9")
+        self.assertFalse(update.due())
 
 
 class Doctor(DikteTest):

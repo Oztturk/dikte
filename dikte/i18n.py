@@ -192,6 +192,25 @@ TR = {
     "Silence threshold": "Sessizlik eşiği",
     "Keep audio files ({path})": "Ses kayıtlarını sakla ({path})",
 
+    # --- updates --------------------------------------------------------
+    "Updates": "Güncelleme",
+    "Look for a newer version once a day": "Günde bir kez yeni sürüm var mı diye bak",
+    "Dikte only looks. What it finds opens the release page in your browser; "
+    "it downloads and installs nothing by itself.":
+        "Dikte yalnızca bakar. Bulduğu şey tarayıcında sürüm sayfasını açar; "
+        "kendi başına hiçbir şey indirmez ve kurmaz.",
+    "Check now": "Şimdi bak",
+    "Looking…": "Bakılıyor…",
+    "Open the release page": "Sürüm sayfasını aç",
+    "This is Dikte {version}.": "Buradaki sürüm Dikte {version}.",
+    "Dikte {version} is the newest release.": "En yeni sürüm zaten bu: Dikte {version}.",
+    "Dikte {version} is out; this is {current}.":
+        "Dikte {version} çıkmış; buradaki sürüm {current}.",
+    "Dikte {version} is out…": "Dikte {version} çıkmış…",
+    "Dikte {version} is out. The tray menu has the release page.":
+        "Dikte {version} çıkmış. Sürüm sayfası tepsi menüsünde.",
+    "{repo} has published no release.": "{repo} için yayımlanmış sürüm yok.",
+
     # --- settings: api --------------------------------------------------
     "Keys": "Anahtarlar",
     "Speech to text": "Sesi yazıya çevirme",

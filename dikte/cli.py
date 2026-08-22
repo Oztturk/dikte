@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import time
+import webbrowser
 
 from PyQt6.QtCore import QCoreApplication, QTimer
 
@@ -30,10 +31,12 @@ from . import cleanup
 from . import config as cfg
 from . import filetranscribe
 from . import hotkey
+from . import hub
 from . import ipc
 from . import integrate
 from . import meeting
 from . import paste
+from . import update
 from . import __version__
 
 NOT_RUNNING = 3
@@ -797,6 +800,33 @@ def cmd_integrate(opts):
                f"{verb}:\n{listing}" if paths else "Nothing to change.")
 
 
+def cmd_update(opts):
+    """Whether a newer Dikte has been released, and where it is.
+
+    It looks and nothing more: what to do about the answer is a download page,
+    because the AppImage, the disk image, the Windows setup and a checkout are
+    four different installations and only their owner knows which one this is.
+    """
+    try:
+        release = update.latest(refresh=True)
+    except hub.HubError as exc:
+        return fail(opts, exc)
+    # Written down even when there is nothing new, so that the application does
+    # not go and ask the same question an hour later.
+    update.remember(release)
+    waiting = update.newer(release.version)
+    payload = {"ok": True, "current": __version__, "latest": release.version,
+               "update": waiting, "url": release.url}
+    if not waiting:
+        return out(opts, payload,
+                   f"Dikte {__version__} is the newest release.")
+    if opts.open:
+        webbrowser.open(release.url)
+    return out(opts, payload,
+               f"Dikte {release.version} is out; this is {__version__}.\n"
+               f"{release.url}")
+
+
 def cmd_status(opts):
     reply = ipc.send("status")
     if reply is None:
@@ -1098,6 +1128,11 @@ def build_parser():
     integrated.set_defaults(func=cmd_integrate)
 
     # --- the application --------------------------------------------------
+    updates = leaf(subs, "update", "whether a newer Dikte has been released")
+    updates.add_argument("--open", action="store_true",
+                         help="open the release page in a browser")
+    updates.set_defaults(func=cmd_update)
+
     leaf(subs, "status", "what it is doing right now").set_defaults(func=cmd_status)
     for name, help_text in (("settings", "open the settings window"),
                             ("restart", "reload the running instance"),

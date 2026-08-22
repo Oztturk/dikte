@@ -25,6 +25,7 @@ from unittest import mock
 from dikte import assistant
 from dikte import config as cfg
 from dikte import i18n
+from dikte import update
 
 # What the application is, rather than what it does: PipeWire, wl-clipboard,
 # ydotool, KDE's shortcut file, /dev/input. A port to another desktop replaces
@@ -86,8 +87,10 @@ class DikteTest(unittest.TestCase):
             MEETINGS_FILE=data_dir / "meetings.jsonl",
         )
         # Resolved from cfg.DATA_DIR when assistant was imported, so it needs
-        # moving on its own.
+        # moving on its own. The same goes for where the update check writes
+        # down when it last ran.
         self.patch_attr(assistant, "SESSION_FILE", data_dir / "assistant.json")
+        self.patch_attr(update, "STATE_FILE", data_dir / "update.json")
 
         i18n.set_language("en")
         self.addCleanup(i18n.set_language, "en")

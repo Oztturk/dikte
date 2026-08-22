@@ -107,7 +107,10 @@ Meetings are not supported there yet; the details are in the
 two global shortcuts, whose keys are its two arguments, or the ones already in
 your settings when it is given none. `./scripts/update.sh` pulls and puts all of
 that back; `./scripts/uninstall.sh` takes it away again and leaves your settings
-and dictations alone unless you pass `--purge`.
+and dictations alone unless you pass `--purge`. Dikte looks at the releases page
+once a day and puts a line in the tray menu when a newer version is out, which
+opens the page rather than installing anything; the General tab turns that off
+or runs it on the spot.
 
 Speech to text and cleanup each pick a provider in the settings window, and both
 run here by default, on models of your own. The cloud is the other option:
@@ -130,6 +133,7 @@ set next to it.
 | Speak a command to an agent | Tray menu → *Ask Claude*, or `dikte ask` |
 | Start / end a meeting | Tray menu → *Record a meeting*, or `dikte meeting` |
 | Settings | Tray menu → *Settings*, or `dikte settings` |
+| Look for a newer version | General tab → *Check now*, or `dikte update` |
 | Reload after an update | Tray menu → *Restart*, or `dikte restart` |
 | Quit | Tray menu → *Quit*, or `dikte quit` |
 
@@ -240,6 +244,7 @@ api.py            transcription and cleanup requests (stdlib only)
 cleanup.py        who rewrites the transcript: OpenRouter, here, Claude or Codex
 ggml.py           whisper.cpp and llama.cpp here: fetch, verify, keep serving
 hub.py            what GitHub and Hugging Face have on offer today
+update.py         whether a newer release is out, and the page it is on
 worker.py         transcribe → clean up → clipboard → paste
 vad.py            deciding whether a recording holds speech at all
 filetranscribe.py file transcription: ffmpeg, chunking, timestamps

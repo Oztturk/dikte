@@ -1122,6 +1122,15 @@ def _stay_out_of_the_dock():
 def run_app(args):
     command = args[0] if args else ""
 
+    # One Dikte per user, checked by asking rather than by listening: see
+    # ipc.already_serving. Before the QApplication, so a second copy costs a
+    # moment and not a second tray icon.
+    if ipc.already_serving():
+        print("dikte: already running; its Settings window has the attention")
+        if command:
+            ipc.send(command)
+        return 0
+
     app = QApplication(sys.argv)
     app.setApplicationName("Dikte")
     app.setDesktopFileName("dikte")

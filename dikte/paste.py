@@ -488,11 +488,14 @@ class _WinInput(ctypes.Structure):
     _fields_ = [("type", ctypes.c_ulong), ("union", _WinInputUnion)]
 
 
-def _win_press(shortcut, delay):
+def _win_press(shortcut, delay, _focus=None):
     """Post the presses and releases straight into the input queue.
 
     No permission stands in front of SendInput the way Accessibility does on
     macOS: whatever window has focus receives the combination.
+
+    Nothing here takes the front from the window being dictated into, so the
+    remembered process id has nothing to hand back to: it is a macOS concern.
     """
     codes = _win_keys(shortcut)
     user32, _ = _win_api()

@@ -33,6 +33,10 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from .i18n import t
 
+# Console programs started from a windowless process would otherwise each open
+# a console window of their own on Windows.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+
 RATE = 16000
 CHANNELS = 1
 SAMPLE_WIDTH = 2  # s16
@@ -55,6 +59,19 @@ QUEUE_BLOCKS = int(STALL_SECONDS * RATE / CHUNK_FRAMES) + 8
 # be done about it any more.
 QUIET_MIC_SECONDS = 10
 QUIET_MIC_SHARE = 0.5
+
+
+def _interrupt(proc):
+    """Ask a recorder process to end.
+
+    SIGINT is the polite way everywhere it exists; Windows has no equivalent a
+    child can be sent, so the process is terminated outright. The captured
+    audio is not lost either way: it has already been read from the pipe.
+    """
+    if sys.platform == "win32":
+        proc.terminate()
+    else:
+        proc.send_signal(signal.SIGINT)
 
 
 class Recorder(QObject):
@@ -111,7 +128,8 @@ class Recorder(QObject):
 
         try:
             self._proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+                creationflags=NO_WINDOW,
             )
         except OSError as exc:
             self.failed.emit(t("Could not start recording: {error}", error=exc))
@@ -172,7 +190,7 @@ class Recorder(QObject):
         proc = self._proc
         if proc and proc.poll() is None:
             try:
-                proc.send_signal(signal.SIGINT)
+                _interrupt(proc)
                 proc.wait(timeout=1.5)
             except (subprocess.TimeoutExpired, OSError):
                 try:
@@ -284,6 +302,14 @@ class MeetingRecorder(QObject):
     def start(self, path, mic_target="", system_target="", max_seconds=14400):
         if self.active:
             return
+        # Before ffmpeg is looked for, because installing it would not help: a
+        # system with no way to capture what the speakers are playing has none
+        # whatever else is on the machine.
+        if not sound().meetings:
+            self.failed.emit(t("This system offers nothing that records what "
+                               "the speakers are playing, so a meeting cannot "
+                               "be recorded on it."))
+            return
         if not shutil.which("ffmpeg"):
             self.failed.emit(t("ffmpeg not found. Install it to record a meeting."))
             return
@@ -312,7 +338,8 @@ class MeetingRecorder(QObject):
             self._procs = []
             for command, log in zip(commands, self._logs):
                 self._procs.append(subprocess.Popen(
-                    command, stdout=subprocess.PIPE, stderr=log, bufsize=0
+                    command, stdout=subprocess.PIPE, stderr=log, bufsize=0,
+                    creationflags=NO_WINDOW,
                 ))
         except (OSError, wave.Error) as exc:
             # One of two capture processes may already be running, and a Mac
@@ -411,7 +438,7 @@ class MeetingRecorder(QObject):
         running = [proc for proc in self._procs if proc.poll() is None]
         for proc in running:
             try:
-                proc.send_signal(signal.SIGINT)
+                _interrupt(proc)
             except OSError:
                 pass
         for proc in running:
@@ -838,13 +865,131 @@ def _avfoundation_default_output():
     return ""
 
 
+# Windows records through DirectShow, the one capture API ffmpeg's Windows
+# builds all ship with. What the speakers are playing is not offered as a
+# device at all, so a meeting has nothing to record the far side from yet.
+
+
+# A device entry and the line under it, in the two shapes ffmpeg has printed
+# this listing in. Newer builds mark each device `(audio)` or `(video)`; older
+# ones print no marker and group the devices under a heading instead. Both are
+# anchored at each end, so that the error lines the command ends with, which
+# quote the device name that was not found, are not read as devices. The
+# bracketed prefix is not pinned to a spelling: ffmpeg 8 writes `[in#0 @ ...]`
+# where the versions before it wrote `[dshow @ ...]`.
+_DSHOW_ENTRY = re.compile(
+    r'^(?:\[[^\]]*\]\s*)?"([^"]+)"\s*(?:\(([^)]*)\))?\s*$')
+_DSHOW_ALTERNATIVE = re.compile(
+    r'^(?:\[[^\]]*\]\s*)?Alternative name\s+"([^"]+)"\s*$')
+_DSHOW_HEADING = re.compile(r'DirectShow (audio|video) devices')
+
+# The last listing taken, so that a dictation does not pay for one of its own.
+_DSHOW_SEEN = []
+
+
+def _parse_dshow_listing(text):
+    """[(id, name)] for the audio devices in one ffmpeg device listing.
+
+    Two friendly names on one machine are routinely identical: a laptop with a
+    headset plugged in shows two microphones called the same thing, and
+    `audio=<name>` would reach only the first of them either way. The
+    alternative name ffmpeg prints under each device is unique and is what the
+    recorder is given back, while the friendly name is what a user picks from.
+    """
+    devices = []
+    heading = ""
+    for line in text.splitlines():
+        found = _DSHOW_HEADING.search(line)
+        if found:
+            heading = found.group(1)
+            continue
+        found = _DSHOW_ALTERNATIVE.match(line.strip())
+        if found:
+            if devices:
+                devices[-1][0] = found.group(1)
+            continue
+        found = _DSHOW_ENTRY.match(line.strip())
+        if found:
+            kind = (found.group(2) or heading).lower()
+            devices.append([found.group(1), found.group(1), kind])
+    return [(identifier, name) for identifier, name, kind in devices
+            if "audio" in kind]
+
+
+def _dshow_devices():
+    """[(id, name)] for every DirectShow audio capture device, freshly asked.
+
+    The list comes out on stderr of a command that then fails, the same
+    documented trick AVFoundation uses above.
+    """
+    if not shutil.which("ffmpeg"):
+        return []
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-list_devices", "true",
+             "-f", "dshow", "-i", "dummy"],
+            capture_output=True, timeout=8, check=False, creationflags=NO_WINDOW,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return []
+
+    devices = _parse_dshow_listing(result.stderr.decode("utf-8", "replace"))
+    _DSHOW_SEEN[:] = devices
+    return devices
+
+
+def _dshow_first_device():
+    """The device an unset target stands for, without a listing per dictation.
+
+    dshow has no "default" for an empty target to mean, so it has to be turned
+    into a name, and asking ffmpeg for one costs a process every time the key
+    is pressed. The last listing is used when there is one: opening Settings or
+    running `dikte devices` takes a fresh one, which is what somebody who has
+    just plugged a microphone in does anyway.
+    """
+    devices = _DSHOW_SEEN or _dshow_devices()
+    return devices[0][0] if devices else ""
+
+
+def _dshow_record(target):
+    if not shutil.which("ffmpeg"):
+        return []
+    device = target or _dshow_first_device()
+    if not device:
+        return []
+    return [
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
+        # dshow holds half a second of audio before handing anything over;
+        # asked for the chunk the level meter is measured in instead.
+        "-f", "dshow", "-audio_buffer_size", str(CHUNK_LATENCY_MS),
+        "-i", f"audio={device}",
+        "-ac", str(CHANNELS), "-ar", str(RATE), "-f", "s16le", "-",
+    ]
+
+
+def _dshow_meeting(mic_target, system_target):
+    return []  # no monitor devices to record the far side from
+
+
+def _dshow_no_outputs():
+    return []
+
+
+def _dshow_no_default_output():
+    return ""
+
+
 Sound = collections.namedtuple(
     "Sound",
     # How to capture one source and how to capture two at once, that one as the
     # list of processes it takes, the two device lists, which device a meeting
-    # records the far side from, and what to say when the programs for any of
-    # it are not installed.
-    "record meeting inputs outputs default_output missing",
+    # records the far side from, whether this system can record one at all, and
+    # what to say when the programs for any of it are not installed.
+    #
+    # `meetings` is the sound system's own answer, not this machine's: an empty
+    # output list means the tool that lists them is missing, which is a thing a
+    # user can go and fix, while False here is a thing they cannot.
+    "record meeting inputs outputs default_output meetings missing",
 )
 
 PULSE = Sound(
@@ -853,6 +998,7 @@ PULSE = Sound(
     inputs=_pulse_inputs,
     outputs=_pulse_outputs,
     default_output=_pulse_default_output,
+    meetings=True,
     missing="No audio recorder found. Install pulseaudio-utils or pipewire-audio.",
 )
 
@@ -865,13 +1011,33 @@ COREAUDIO = Sound(
     # empty list would leave nothing to pick.
     outputs=_avfoundation_named_inputs,
     default_output=_avfoundation_default_output,
+    # With a loopback driver installed, which is what the Settings note is for.
+    meetings=True,
     missing="ffmpeg not found. Install it with: brew install ffmpeg",
+)
+
+
+DSHOW = Sound(
+    record=_dshow_record,
+    meeting=_dshow_meeting,
+    inputs=_dshow_devices,
+    outputs=_dshow_no_outputs,
+    default_output=_dshow_no_default_output,
+    # Windows offers no capture device for what the speakers are playing, and
+    # there is no driver to install that would add one.
+    meetings=False,
+    missing="ffmpeg or a microphone was not found. Install ffmpeg with: "
+            "winget install Gyan.FFmpeg",
 )
 
 
 def sound():
     """The programs this machine records through."""
-    return COREAUDIO if sys.platform == "darwin" else PULSE
+    if sys.platform == "darwin":
+        return COREAUDIO
+    if sys.platform == "win32":
+        return DSHOW
+    return PULSE
 
 
 def list_sources():

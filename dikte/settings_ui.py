@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QScrollArea, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from . import __version__
 from . import api
 from . import assistant
 from . import audio
@@ -21,9 +22,11 @@ from . import config as cfg
 from . import filetranscribe
 from . import ggml
 from . import hotkey
+from . import hub
 from . import ipc
 from . import meeting
 from . import paste
+from . import update
 from .filetranscribe import FileTranscriber
 from .i18n import t
 
@@ -512,11 +515,16 @@ class LocalModelBox(QGroupBox):
 
 class SettingsWindow(QDialog):
     applied = pyqtSignal()
+    # A newer release this window's own check found, so that the tray icon
+    # hears about it from here rather than waiting for its own next check.
+    update_found = pyqtSignal(object)
 
     _models_loaded = pyqtSignal(list, str)
     _transcribe_models_loaded = pyqtSignal(list, str)
     # Which key was tested, whether it worked, and what to write under it.
     _test_done = pyqtSignal(str, bool, str)
+    # The release that was found, or None, and what went wrong instead.
+    _update_checked = pyqtSignal(object, str)
 
     def __init__(self, conf, meetings=None, parent=None):
         super().__init__(parent)
@@ -533,6 +541,9 @@ class SettingsWindow(QDialog):
         self._key_fields = {}
         self._testers = {}
         self._shown_provider = ""
+        # Where "Open the release page" goes: the release itself once a check
+        # has named one, and the page that redirects to the newest until then.
+        self._release_url = update.RELEASES_PAGE
         self.transcriber = FileTranscriber(conf, self)
         self.setWindowTitle(t("Dikte Settings"))
 
@@ -567,6 +578,7 @@ class SettingsWindow(QDialog):
         self._models_loaded.connect(self._on_models_loaded)
         self._transcribe_models_loaded.connect(self._on_transcribe_models_loaded)
         self._test_done.connect(self._on_test_done)
+        self._update_checked.connect(self._on_update_checked)
         self.transcriber.progress.connect(self._on_file_progress)
         self.transcriber.finished.connect(self._on_file_finished)
         self.transcriber.failed.connect(self._on_file_failed)
@@ -698,6 +710,23 @@ class SettingsWindow(QDialog):
             t("Keep audio files ({path})", path=str(cfg.RECORDINGS_DIR))
         )
         form.addRow("", self.keep_audio)
+
+        self.update_check = QCheckBox(t("Look for a newer version once a day"))
+        self.update_check.setToolTip(
+            t("Dikte only looks. What it finds opens the release page in your "
+              "browser; it downloads and installs nothing by itself.")
+        )
+        form.addRow(t("Updates"), self.update_check)
+
+        self.update_status = WrappedLabel("")
+        self.update_page = QPushButton(t("Open the release page"))
+        self.update_page.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl(self._release_url))
+        )
+        self.update_now = QPushButton(t("Check now"))
+        self.update_now.clicked.connect(self._check_for_update)
+        form.addRow("", self._row(self.update_status, self.update_page,
+                                  self.update_now))
         return page
 
     def _api_tab(self):
@@ -1100,6 +1129,18 @@ class SettingsWindow(QDialog):
             ))
             mac_note.setWordWrap(True)
             sources_form.addRow(mac_note)
+        elif not audio.sound().meetings:
+            # Windows is the system this is written for: it offers nothing that
+            # captures what the speakers are playing, and there is no driver to
+            # install that would put an entry in the list above. Left unsaid,
+            # the box is simply empty and the Record button fails at the press.
+            nothing_note = QLabel(t(
+                "This system offers nothing that records what the speakers are "
+                "playing, so a meeting cannot be recorded on it. Dictation and "
+                "transcribing a file are unaffected."
+            ))
+            nothing_note.setWordWrap(True)
+            sources_form.addRow(nothing_note)
 
         note = QLabel(t(
             "Wear headphones if you can. Through speakers your microphone hears "
@@ -1369,6 +1410,12 @@ class SettingsWindow(QDialog):
                 "running. Nothing is installed, and no other application receives "
                 "them in the meantime."
             )
+        elif hotkey.backend() == hotkey.WINDOWS:
+            explanation = t(
+                "Dikte asks Windows for these combinations itself, while it is "
+                "running. Nothing is installed, and no other application receives "
+                "them in the meantime."
+            )
         else:
             # The desktops nobody writes a backend for. Saying "installed" here
             # would be the old bug in words: there is no registry, the listener
@@ -1550,6 +1597,8 @@ class SettingsWindow(QDialog):
         self.silence_db.setValue(int(conf["silence_db"]))
         self.filter_hallucinations.setChecked(conf["filter_hallucinations"])
         self.keep_audio.setChecked(conf["keep_audio"])
+        self.update_check.setChecked(conf["update_check"])
+        self._show_update(update.pending())
 
         for name, who in cfg.TRANSCRIBERS.items():
             self._key_fields[name].setText(conf[who.key])
@@ -1643,6 +1692,7 @@ class SettingsWindow(QDialog):
         conf["silence_db"] = float(self.silence_db.value())
         conf["filter_hallucinations"] = self.filter_hallucinations.isChecked()
         conf["keep_audio"] = self.keep_audio.isChecked()
+        conf["update_check"] = self.update_check.isChecked()
 
         provider = self.transcribe_provider.currentData() or "local"
         if provider in self._models:
@@ -1872,6 +1922,45 @@ class SettingsWindow(QDialog):
         button, answer = self._testers[provider]
         button.setEnabled(True)
         answer.setText(("✓ " if ok else "✗ ") + message)
+
+    # ---- updates ---------------------------------------------------------
+
+    def _check_for_update(self):
+        """The button, which asks GitHub whatever the daily clock says."""
+        self.update_now.setEnabled(False)
+        self.update_status.setText(t("Looking…"))
+
+        def work():
+            try:
+                self._update_checked.emit(update.check(force=True), "")
+            except hub.HubError as exc:
+                self._update_checked.emit(None, str(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_checked(self, release, error):
+        self.update_now.setEnabled(True)
+        if error:
+            self.update_status.setText(error)
+            return
+        self._show_update(release, asked=True)
+        if release is not None:
+            self.update_found.emit(release)
+
+    def _show_update(self, release, asked=False):
+        """What the line under the checkbox says, and whether the page button
+        is on it. `release` is None when this build is the newest one, and
+        `asked` is what tells "nothing new" from "nobody has looked yet"."""
+        self.update_page.setVisible(release is not None)
+        if release is None:
+            self.update_status.setText(
+                t("Dikte {version} is the newest release.", version=__version__)
+                if asked else t("This is Dikte {version}.", version=__version__))
+            return
+        self._release_url = release.url
+        self.update_status.setText(
+            t("Dikte {version} is out; this is {current}.",
+              version=release.version, current=__version__))
 
     # ---- audio file ------------------------------------------------------
 

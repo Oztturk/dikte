@@ -9,12 +9,14 @@ has to notice AppImageLauncher's entry, which is not under the name ours is.
 import os
 import pathlib
 import plistlib
+import re
 import sys
 import tempfile
 import unittest
 from unittest import mock
 
 from dikte import integrate
+from tests.support import posix_only
 
 
 class Frozen:
@@ -75,6 +77,7 @@ class WhatToStart(unittest.TestCase):
     def test_a_checkout_names_this_interpreter_and_the_entry_point(self):
         self.assertFalse(integrate.packaged())
 
+    @posix_only
     def test_an_appimage_names_the_file_and_not_the_mount(self):
         """The mount is a fresh /tmp path every run; a shortcut written to it
         would work until the next login and never again."""
@@ -83,6 +86,7 @@ class WhatToStart(unittest.TestCase):
             self.assertEqual(str(integrate.target()),
                              "/home/someone/Downloads/Dikte.AppImage")
 
+    @posix_only
     def test_a_mac_names_the_bundle_and_not_the_executable_inside_it(self):
         with Frozen("/Applications/Dikte.app/Contents/MacOS/Dikte",
                     platform="darwin"):
@@ -95,6 +99,7 @@ class WhatToStart(unittest.TestCase):
 class BundledTools(unittest.TestCase):
     """The ffmpeg the disk image carries, and how anything finds it."""
 
+    @posix_only
     def test_a_mac_looks_beside_the_bundle_not_beside_the_executable(self):
         with Frozen("/Applications/Dikte.app/Contents/MacOS/Dikte",
                     platform="darwin"):
@@ -213,6 +218,7 @@ class Certificates(unittest.TestCase):
             self.assertIsNone(integrate.use_system_certificates())
 
 
+@posix_only
 class Linux(Home):
     def install(self, appimage, force=False):
         with Frozen("/tmp/.mount_x/usr/bin/dikte", appimage=str(appimage),
@@ -348,6 +354,7 @@ class Linux(Home):
             self.assertEqual(integrate.ensure(), [])
 
 
+@posix_only
 class MacOS(Home):
     def agent(self):
         return self.home / "Library/LaunchAgents/io.github.yusufipk.dikte.plist"
@@ -357,6 +364,12 @@ class MacOS(Home):
                     platform="darwin"), \
              mock.patch.object(integrate, "_launchctl_reload"):
             return integrate.install(force=force)
+
+    def remove(self):
+        with Frozen("/Applications/Dikte.app/Contents/MacOS/Dikte",
+                    home=self.home, platform="darwin"), \
+             mock.patch("subprocess.run"):
+            return integrate.remove()
 
     def test_it_writes_a_login_item_and_the_command(self):
         app = self.home / "Applications" / "Dikte.app"
@@ -418,6 +431,123 @@ class MacOS(Home):
         (app / "Contents/MacOS").mkdir(parents=True)
         self.install(app)
         self.assertIn("install-mac.sh", command.read_text())
+
+    def test_removing_takes_back_the_login_item_and_command_it_wrote(self):
+        app = self.home / "Applications" / "Dikte.app"
+        (app / "Contents/MacOS").mkdir(parents=True)
+        self.install(app)
+        command = self.home / ".local/bin/dikte"
+
+        self.assertEqual(self.remove(), [self.agent(), command])
+        self.assertFalse(self.agent().exists())
+        self.assertFalse(command.exists())
+
+    def test_removing_leaves_another_installers_command_alone(self):
+        command = self.home / ".local/bin/dikte"
+        command.parent.mkdir(parents=True)
+        command.write_text("#!/bin/sh\n# Written by install-mac.sh.\n"
+                           "exec /usr/local/bin/python3 /src/__main__.py \"$@\"\n")
+
+        self.assertEqual(self.remove(), [])
+        self.assertIn("install-mac.sh", command.read_text())
+
+
+class Windows(unittest.TestCase):
+    """The half of the Windows install the setup program cannot do.
+
+    It writes the Start Menu entry, the command and the uninstaller as it runs,
+    and asks once whether Dikte should start at sign-in. Changing that answer
+    afterwards is what is left here, and the value is faked rather than the
+    registry, so that all of it is read on every platform the tests run on.
+    """
+
+    def setUp(self):
+        self.value = ""
+        for name, function in (("_run_entry", lambda: self.value),
+                               ("_write_run_entry", self._write),
+                               ("_delete_run_entry", self._delete)):
+            patch = mock.patch.object(integrate, name, function)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.installed = pathlib.Path(self.tmp.name).resolve()
+        self.app = self.installed / "Dikte.exe"
+        self.app.write_text("")
+
+    def _write(self, command):
+        self.value = command
+
+    def _delete(self):
+        there, self.value = bool(self.value), ""
+        return there
+
+    def install(self, force=False):
+        with Frozen(str(self.app), platform="win32"):
+            return integrate.install(force=force)
+
+    def remove(self):
+        with Frozen(str(self.app), platform="win32"):
+            return integrate.remove()
+
+    def test_the_windowed_executable_is_what_starts_at_sign_in(self):
+        """The console one is what the `dikte` command runs, and a sign-in that
+        started that would open a console window nobody asked for."""
+        with Frozen(str(self.installed / "dikte-cli.exe"), platform="win32"):
+            self.assertEqual(integrate.target(), self.app)
+
+    def test_a_start_does_not_turn_it_on_for_somebody_who_said_no(self):
+        self.assertEqual(self.install(), [])
+        self.assertEqual(self.value, "")
+
+    def test_typing_it_turns_starting_at_sign_in_on(self):
+        self.assertEqual(len(self.install(force=True)), 1)
+        self.assertEqual(self.value, f'"{self.app}"')
+
+    def test_an_installation_that_moved_is_pointed_at_where_it_is_now(self):
+        self.value = '"D:\\Dikte\\Dikte.exe"'
+        self.assertEqual(len(self.install()), 1)
+        self.assertEqual(self.value, f'"{self.app}"')
+
+    def test_running_it_again_changes_nothing(self):
+        self.install(force=True)
+        self.assertEqual(self.install(), [])
+
+    def test_removing_stops_it_starting_and_says_so_once(self):
+        self.install(force=True)
+        self.assertEqual(len(self.remove()), 1)
+        self.assertEqual(self.value, "")
+        self.assertEqual(self.remove(), [])
+
+
+class WindowsExecutableNames(unittest.TestCase):
+    """The two Windows executables, read out of the files that name them.
+
+    Windows matches a filename without regard to its case, so Dikte.exe and
+    dikte.exe are one file in one directory and whichever was written second is
+    the only one installed. Nothing else here would catch that: these tests and
+    the builds that check the packaging both run on filesystems where the two
+    names are two files.
+    """
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+
+    def executables(self):
+        """What the spec calls each one, in the order it builds them."""
+        spec = (self.root / "packaging" / "dikte.spec").read_text()
+        return [re.search(r'name="(.*?)"', block).group(1)
+                for block in spec.split("EXE(")[1:]]
+
+    def test_the_two_are_more_than_a_case_apart(self):
+        windowed, console = self.executables()
+        self.assertNotEqual(windowed.lower(), console.lower())
+
+    def test_the_command_runs_the_console_one(self):
+        """The setup writes the shim, so it is the setup that has to be right."""
+        console = self.executables()[1]
+        setup = (self.root / "packaging" / "dikte.iss").read_text()
+        self.assertIn(f"{{app}}\\{console}.exe", setup)
 
 
 if __name__ == "__main__":

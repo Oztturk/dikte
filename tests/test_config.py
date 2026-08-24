@@ -8,6 +8,7 @@ config and now shadows the default.
 
 import json
 import os
+import sys
 import unittest
 from unittest import mock
 
@@ -89,6 +90,8 @@ class Saving(DikteTest):
         cfg.Config().save()
         self.assertTrue(cfg.CONFIG_FILE.exists())
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "NTFS access is decided by ACLs, not by the mode bits")
     def test_the_file_is_readable_by_nobody_else(self):
         """It holds two API keys."""
         cfg.Config().save()
@@ -491,6 +494,9 @@ class ReadyToRun(DikteTest):
     def setUp(self):
         super().setUp()
         self.patch_attr(ggml, "MODELS_DIR", self.path("models"))
+        # A machine Dikte is actually installed on would otherwise answer for
+        # the "missing program" below through the real install record.
+        self.patch_attr(ggml, "BIN_DIR", self.path("bin"))
 
     def install(self, name):
         path = ggml.whisper_model_path(name)

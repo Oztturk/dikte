@@ -4,10 +4,10 @@
 çevrilir, bir model transkripti temizler (ıı'lar, tekrarlar, eksik noktalama),
 sonuç panoya kopyalanır ve o an yazdığın pencereye yapıştırılır.
 
-KDE Plasma 6 / Wayland için yazıldı; GNOME X11'de, macOS'ta ve klavyeyi
-okumasına izin veren diğer Linux masaüstlerinde de çalışır. Sistem
-paketleri dışında bağımlılığı yok: sadece Python standart kütüphanesi (3.11 veya
-üstü) ve PyQt6.
+KDE Plasma 6 / Wayland için yazıldı; GNOME X11'de, macOS'ta,
+[Windows](README.windows.md)'ta ve klavyeyi okumasına izin veren diğer Linux
+masaüstlerinde de çalışır. Sistem paketleri dışında bağımlılığı yok: sadece
+Python standart kütüphanesi (3.11 veya üstü) ve PyQt6.
 
 *[English README](README.md)*
 
@@ -23,15 +23,16 @@ paketleri dışında bağımlılığı yok: sadece Python standart kütüphanesi
 
 ## Kurulum
 
-[Sürümler sayfasında](../../releases) bir AppImage, bir de her Mac mimarisi
-için birer disk imajı var. İkisi de ilk çalıştıklarında kendi menü girdisini,
-oturum açılışını ve `dikte` komutunu yazar, makinede zaten duran bir kuruluma
-dokunmazlar; `dikte integrate --remove` yazdıklarını geri alır. AppImage yine
-de aşağıdaki sistem paketlerini ister: ses sunucusu, pano ve klavye onlardan
-gelir. Disk imajı bir Apple sertifikasıyla imzalı değil, bu yüzden ilk açılış
-reddedilir, Sistem Ayarları → Gizlilik ve Güvenlik altından **Yine de Aç**
-demek gerekir; macOS her güncellemeden sonra mikrofonu ve Erişilebilirliği
-yeniden sorar, checkout'tan kurmak bundan kurtarır.
+[Sürümler sayfasında](../../releases) bir AppImage, her Mac mimarisi için
+birer disk imajı, bir de Windows kurulumu var. İlk ikisi ilk çalıştıklarında
+kendi menü girdisini, oturum açılışını ve `dikte` komutunu yazar, makinede
+zaten duran bir kuruluma dokunmazlar; `dikte integrate --remove` yazdıklarını
+geri alır. AppImage yine de aşağıdaki sistem paketlerini ister: ses sunucusu,
+pano ve klavye onlardan gelir. Disk imajı bir Apple sertifikasıyla imzalı
+değil, bu yüzden ilk açılış reddedilir, Sistem Ayarları → Gizlilik ve Güvenlik
+altından **Yine de Aç** demek gerekir; macOS her güncellemeden sonra mikrofonu
+ve Erişilebilirliği yeniden sorar, checkout'tan kurmak bundan kurtarır.
+Windows kurulumu yalnızca kendi hesabına kurar ve yanında bir ffmpeg taşır.
 
 ```sh
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
@@ -92,11 +93,20 @@ build -j`) ve yolunu Ayarlar → API'ye yaz, ya da buluta çevir. Toplantı içi
 BlackHole veya Loopback gerekiyor (`brew install blackhole-2ch`); dikte için
 gerekmiyor.
 
+Windows da aynı şekilde çalışıyor, Dikte açıkken kombinasyonu sistemin kendi
+kısayol servisi üzerinden tutuyor. Sürümler sayfasındaki kurulum kaydın
+istediği ffmpeg'i de taşıyor ve yönetici istemiyor; checkout'tan ise `winget
+install Gyan.FFmpeg`, `pip install PyQt6`, sonra `python -m dikte`, Başlat
+Menüsü girdisi ve `dikte` komutu için de isteğe bağlı `install.ps1`. Orada
+toplantı kaydı henüz yok, ayrıntılar [Windows README](README.windows.md)'sinde.
+
 `install.sh` `dikte` komutunu, menü girdisini, oturum açılışında otomatik
 başlatmayı ve iki global kısayolu kurar; tuşları iki argümanı, argüman
 verilmezse ayarlarında duranlar. `./scripts/update.sh` son sürümü çeker ve
 bunları yerine koyar; `./scripts/uninstall.sh` hepsini geri alır, `--purge`
-demedikçe ayarlarına ve diktelerine dokunmaz.
+demedikçe ayarlarına ve diktelerine dokunmaz. Dikte sürüm sayfasına günde bir
+kez bakar ve yeni sürüm çıkmışsa tepsi menüsüne bir satır koyar; o satır bir şey
+kurmaz, sayfayı açar. Genel sekmesi bu denetimi kapatır ya da anında çalıştırır.
 
 Sesi yazıya çevirme ve temizleme, ayarlar penceresinde ayrı ayrı sağlayıcı
 seçer; ikisi de varsayılan olarak burada, kendi modellerinle çalışır. Bulutu
@@ -119,6 +129,7 @@ yanındaki kutudan düşünme seviyesini de seçebilirsin.
 | Ajana sesle komut ver | Tepsi menüsü → *Claude'a sor*, ya da `dikte ask` |
 | Toplantıyı başlat / bitir | Tepsi menüsü → *Toplantı kaydet*, ya da `dikte meeting` |
 | Ayarlar | Tepsi menüsü → *Ayarlar*, ya da `dikte settings` |
+| Yeni sürüm var mı bak | Genel sekmesi → *Şimdi bak*, ya da `dikte update` |
 | Güncelleme sonrası yeniden yükle | Tepsi menüsü → *Yeniden başlat*, ya da `dikte restart` |
 | Çık | Tepsi menüsü → *Çık*, ya da `dikte quit` |
 
@@ -211,9 +222,9 @@ Kısayollar sekmesi bağlanacak komutu gösterir.
 Aşağıdakilerin hepsi `dikte` paketinin içinde: `python3 -m dikte` bunu çalıştırır,
 içindeki `__main__.py` de her başlatıcının ve kısayolun adlandırdığı dosyadır.
 `scripts/` altında install-mac.sh, update.sh, uninstall.sh ve release.sh var;
-`packaging/` release.sh'ın attığı etiketin yayımladığı AppImage ile disk
-imajını derler; install.sh en üstte kalır, `tests/` içinde de her modülün bir
-dosyası.
+`packaging/` release.sh'ın attığı etiketin yayımladığı AppImage'i, disk imajını
+ve Windows kurulumunu derler; install.sh en üstte kalır, `tests/` içinde de her
+modülün bir dosyası.
 
 ```
 app.py            giriş noktası, tepsi simgesi, durum makinesi
@@ -226,6 +237,7 @@ api.py            transkript ve temizleme istekleri (yalnız stdlib)
 cleanup.py        transkripti kim temizler: OpenRouter, burası, Claude ya da Codex
 ggml.py           whisper.cpp ve llama.cpp'yi indirip burada çalıştırma
 hub.py            GitHub ve Hugging Face'te bugün ne olduğu
+update.py         yeni sürüm çıkmış mı, çıkmışsa hangi sayfada
 worker.py         transkript → temizleme → pano → yapıştırma
 vad.py            kayıtta gerçekten konuşma var mı kararı
 filetranscribe.py dosyadan transkript: ffmpeg, parçalama, zaman damgaları

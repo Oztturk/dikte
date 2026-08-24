@@ -43,6 +43,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 
 from . import hub
 from . import paths
@@ -154,11 +155,14 @@ def download(item, target, on_progress=None, should_stop=None, require_hash=True
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             total = int(response.headers.get("Content-Length") or item.size or 0)
+            # Windows refuses to delete a file that is open, so nothing is
+            # unlinked until the handle is closed again.
+            stopped = overlong = False
             with open(part, "wb") as out:
                 while True:
                     if should_stop is not None and should_stop():
-                        part.unlink(missing_ok=True)
-                        return False
+                        stopped = True
+                        break
                     block = response.read(DOWNLOAD_CHUNK)
                     if not block:
                         break
@@ -168,11 +172,17 @@ def download(item, target, on_progress=None, should_stop=None, require_hash=True
                     # More than was announced: a body that does not end is the
                     # one way this loop could run until the disk is full.
                     if total and done > total:
-                        part.unlink(missing_ok=True)
-                        raise LocalError(t("{name} is longer than it said it "
-                                           "would be.", name=item.name))
+                        overlong = True
+                        break
                     if on_progress is not None:
                         on_progress(done, total)
+            if stopped:
+                part.unlink(missing_ok=True)
+                return False
+            if overlong:
+                part.unlink(missing_ok=True)
+                raise LocalError(t("{name} is longer than it said it "
+                                   "would be.", name=item.name))
         # A proxy notice or an error page that came back as 200 would otherwise
         # be renamed into place and only fail when something tries to read it.
         if total and done != total:
@@ -218,9 +228,11 @@ def _has_vulkan():
     llama.cpp publishes no CUDA build for Linux, so Vulkan is what a graphics
     card gets here. The build without it is smaller and runs on the CPU, and
     fetching the Vulkan one for a machine that cannot load it would only make
-    the download bigger.
+    the download bigger. Windows spells the loader vulkan-1.dll.
     """
-    return bool(ctypes.util.find_library("vulkan"))
+    return bool(ctypes.util.find_library("vulkan")
+                or (sys.platform == "win32"
+                    and ctypes.util.find_library("vulkan-1")))
 
 
 def _wanted_assets(program):
@@ -233,6 +245,20 @@ def _wanted_assets(program):
     arch = _arch()
     if sys.platform == "darwin":
         return () if program is WHISPER else (f"bin-macos-{arch}.tar.gz",)
+    if sys.platform == "win32":
+        if program is WHISPER:
+            # The BLAS build first: on a plain CPU it transcribes about twice
+            # as fast as the stock one, and it carries everything it needs.
+            # Full names, because "bin-x64.zip" alone would also match the
+            # CUDA archives, whichever the release happened to list first.
+            #
+            # x64 whatever this machine is, because whisper.cpp publishes no
+            # arm64 build for Windows: a Snapdragon runs this one emulated,
+            # which is slow but is the only local option there is.
+            return ("whisper-blas-bin-x64.zip", "whisper-bin-x64.zip")
+        if _has_vulkan() and arch == "x64":
+            return ("bin-win-vulkan-x64.zip", f"bin-win-cpu-{arch}.zip")
+        return (f"bin-win-cpu-{arch}.zip",)
     if program is LLAMA and _has_vulkan():
         return (f"bin-ubuntu-vulkan-{arch}.tar.gz", f"bin-ubuntu-{arch}.tar.gz")
     return (f"bin-ubuntu-{arch}.tar.gz",)
@@ -278,6 +304,11 @@ def system_program(program):
     return bool(shutil.which(program.binary))
 
 
+def _binary_file(program):
+    """What the program's file is called on disk here."""
+    return f"{program.binary}.exe" if sys.platform == "win32" else program.binary
+
+
 def _find_binary(root, name):
     for path in sorted(pathlib.Path(root).rglob(name)):
         if path.is_file():
@@ -286,19 +317,24 @@ def _find_binary(root, name):
 
 
 def _extract(archive, into):
-    """Unpack a release tarball, refusing anything that reaches outside `into`.
+    """Unpack a release archive, refusing anything that reaches outside `into`.
 
     The archives lay their libraries next to their binaries and are linked with
     an $ORIGIN runpath, so a whole directory is what has to survive the trip and
-    the binary cannot be lifted out of it.
+    the binary cannot be lifted out of it. Linux and macOS releases come as
+    tarballs, Windows ones as zips; zipfile never writes outside its target.
     """
     try:
+        if str(archive).endswith(".zip"):
+            with zipfile.ZipFile(archive) as bundle:
+                bundle.extractall(into)
+            return
         with tarfile.open(archive, "r:gz") as tar:
             try:
                 tar.extractall(into, filter="data")
             except TypeError:      # Python without the extraction filters
                 tar.extractall(into)
-    except (tarfile.TarError, OSError) as exc:
+    except (tarfile.TarError, zipfile.BadZipFile, OSError) as exc:
         raise LocalError(t("Could not unpack {name}: {error}",
                            name=os.path.basename(str(archive)), error=exc)) from exc
 
@@ -344,7 +380,7 @@ def install_program(program, tag="", on_progress=None, should_stop=None,
         if not download(item, archive, on_progress, should_stop):
             return ""
         _extract(archive, into)
-        binary = _find_binary(into, program.binary)
+        binary = _find_binary(into, _binary_file(program))
         if binary is None:
             raise LocalError(t("{name} was not in the download.",
                                name=program.binary))
@@ -501,6 +537,26 @@ def _tail(path, lines=3):
     return " | ".join(found[-lines:])
 
 
+def _win_image_name(pid):
+    """The lower-cased file name of the process's executable, or ''."""
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel32.OpenProcess(0x1000, False, pid)   # QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ""
+    try:
+        buffer = ctypes.create_unicode_buffer(260)
+        size = ctypes.c_uint32(len(buffer))
+        ok = kernel32.QueryFullProcessImageNameW(
+            ctypes.c_void_p(handle), 0, buffer, ctypes.byref(size))
+        return os.path.basename(buffer.value).lower() if ok else ""
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 class Server:
     """One process, started when something needs it and stopped when nothing does.
 
@@ -602,6 +658,8 @@ class Server:
                         args + ["--host", HOST, "--port", str(port)],
                         stdout=sink, stderr=subprocess.STDOUT,
                         stdin=subprocess.DEVNULL,
+                        # No console window of its own on Windows.
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                     )
             except OSError as exc:
                 raise LocalError(t("Could not start {name}: {error}",
@@ -699,8 +757,11 @@ class Server:
         number could belong to something else entirely, and killing it would be
         a good deal worse than the leak being cleaned up. The program name alone
         could be somebody else's copy; the name together with Dikte's own data
-        directory on the command line could not.
+        directory on the command line could not. Windows offers no command line
+        to read, so the executable's name is the whole of the answer there.
         """
+        if sys.platform == "win32":
+            return _win_image_name(pid) == _binary_file(self.program).lower()
         try:
             blob = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
         except OSError:

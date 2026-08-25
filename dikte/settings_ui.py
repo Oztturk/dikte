@@ -96,6 +96,12 @@ PERMISSION_MODES = [
     ("Allow everything", "bypassPermissions"),
     ("Only what needs no permission", "manual"),
 ]
+def _typed_model_note(name):
+    """Every model box takes a typed name too; the tooltip that says so."""
+    return t("The list is a starting point, not a fence: any model name "
+             "{name} accepts can be typed straight in.", name=name)
+
+
 # Codex confines the commands it runs instead of asking about them.
 CODEX_SANDBOXES = [
     ("Read anything, write in the working directory", "workspace-write"),
@@ -848,11 +854,13 @@ class SettingsWindow(QDialog):
         self.cleanup_claude_model = QComboBox()
         self.cleanup_claude_model.setEditable(True)
         self.cleanup_claude_model.addItems(CLEANUP_CLAUDE_MODELS)
+        self.cleanup_claude_model.setToolTip(_typed_model_note("Claude Code"))
         orr_form.addRow(t("Model"), self.cleanup_claude_model)
 
         self.cleanup_codex_model = QComboBox()
         self.cleanup_codex_model.setEditable(True)
         self.cleanup_codex_model.addItems([t("Codex's own default")] + CODEX_MODELS)
+        self.cleanup_codex_model.setToolTip(_typed_model_note("Codex"))
         orr_form.addRow(t("Model"), self.cleanup_codex_model)
 
         self.cleanup_reasoning = QComboBox()
@@ -1012,7 +1020,7 @@ class SettingsWindow(QDialog):
             "A name like “sonnet” always means the newest model of that line. "
             "Opus thinks harder and answers slower, which is felt here more "
             "than anywhere else: you are standing in front of the screen."
-        ))
+        ) + " " + _typed_model_note("Claude Code"))
         claude_form.addRow(t("Model"), self.assistant_model)
         self.assistant_permission = QComboBox()
         for label, value in PERMISSION_MODES:
@@ -1027,6 +1035,7 @@ class SettingsWindow(QDialog):
         self.assistant_codex_model.addItem(t("Codex's own default"), "")
         for name in CODEX_MODELS:
             self.assistant_codex_model.addItem(name, name)
+        self.assistant_codex_model.setToolTip(_typed_model_note("Codex"))
         codex_form.addRow(t("Model"), self.assistant_codex_model)
         self.assistant_codex_sandbox = QComboBox()
         for label, value in CODEX_SANDBOXES:

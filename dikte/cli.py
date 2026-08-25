@@ -227,7 +227,8 @@ def cmd_ask(opts):
         conf["assistant_provider"] = opts.provider
     if opts.model:
         key = {"claude": "assistant_model", "codex": "assistant_codex_model",
-               "openrouter": "assistant_openrouter_model"}[assistant.provider(conf)]
+               "openrouter": "assistant_openrouter_model",
+               "opencode": "assistant_opencode_model"}[assistant.provider(conf)]
         conf[key] = opts.model
     if opts.dir:
         conf["assistant_dir"] = opts.dir
@@ -519,7 +520,7 @@ def cmd_history_clear(opts):
 
 # --- settings ---------------------------------------------------------------
 
-SECRET_KEYS = ("openai_api_key", "openrouter_api_key")
+SECRET_KEYS = ("openai_api_key", "openrouter_api_key", "opencode_api_key")
 
 
 def _mask(key, value):
@@ -709,6 +710,14 @@ def cmd_test_key(opts):
             results[name] = {"ok": True, "message": message}
         except api.ApiError as exc:
             results[name] = {"ok": False, "message": str(exc)}
+    if opts.which in ("opencode", "all"):
+        try:
+            count = len(api.openai_models(conf.opencode_key(),
+                                          conf["opencode_base_url"], "OpenCode Go"))
+            results["opencode"] = {"ok": True,
+                                   "message": f"connection works, {count} models visible"}
+        except api.ApiError as exc:
+            results["opencode"] = {"ok": False, "message": str(exc)}
     everything_ok = all(item["ok"] for item in results.values())
     lines = [f"{'✓' if item['ok'] else '✗'} {name}: {item['message']}"
              for name, item in results.items()]
@@ -875,7 +884,9 @@ def cmd_doctor(opts):
                           "key": bool(target.api_key)},
         "cleanup": {"enabled": conf["cleanup_enabled"], "provider": cleaner,
                     "model": cleanup.model(conf),
-                    "key": bool(conf.openrouter_key())},
+                    "key": (bool(conf.openrouter_key()) if cleaner == "openrouter"
+                            else bool(conf.opencode_key())
+                            if cleaner == "opencode" else None)},
         "agent": {"provider": assistant.provider(conf),
                   "directory": assistant.working_dir(conf)},
         "running": ipc.send("status") is not None,
@@ -888,6 +899,8 @@ def cmd_doctor(opts):
         # Cleanup on a CLI needs no key, so what is checked is the program.
         (f"{'✓' if conf.openrouter_key() else '✗'} OpenRouter key, cleaning up on "
          f"{conf['cleanup_model']}") if cleaner == "openrouter" else
+        (f"{'✓' if conf.opencode_key() else '✗'} OpenCode Go key, cleaning up on "
+         f"{conf['cleanup_opencode_model']}") if cleaner == "opencode" else
         (f"{'✓' if programs[cleanup.executable(cleaner)] else '✗'} "
          f"{cleanup.executable(cleaner)}, cleaning up on {cleanup.model(conf)}"),
         f"{'✓' if checks['running'] else '·'} application "
@@ -977,7 +990,7 @@ def build_parser():
     ask = leaf(subs, "ask", "put a command to the agent")
     ask.add_argument("text", nargs="*", help="the command; read from stdin, or "
                                              "recorded when there is none")
-    ask.add_argument("--provider", choices=("claude", "codex", "openrouter"),
+    ask.add_argument("--provider", choices=("claude", "codex", "openrouter", "opencode"),
                      help="just for this run")
     ask.add_argument("--model", help="just for this run")
     ask.add_argument("--dir", help="working directory, just for this run")
@@ -1100,7 +1113,7 @@ def build_parser():
     models.set_defaults(func=cmd_models)
     test = leaf(subs, "test-key", "check the API keys")
     test.add_argument("which", nargs="?", default="all",
-                      choices=("all", *cfg.TRANSCRIBERS))
+                      choices=("all", *cfg.TRANSCRIBERS, "opencode"))
     test.set_defaults(func=cmd_test_key)
     leaf(subs, "doctor", "keys, programs, and what is missing").set_defaults(func=cmd_doctor)
 

@@ -61,7 +61,8 @@ CLEANUP_MODELS = [
 # model here takes a little longer and costs nothing, and the two CLIs the agent
 # can run on open a whole session to do the smaller job.
 CLEANUP_PROVIDERS = [
-    ("OpenRouter", "openrouter"), ("This machine (llama.cpp)", "local"),
+    ("OpenRouter", "openrouter"), ("OpenCode Go", "opencode"),
+    ("This machine (llama.cpp)", "local"),
     ("Claude Code", "claude"), ("Codex", "codex"),
 ]
 # Cleaning up a sentence is the lightest thing either of them will ever be
@@ -74,7 +75,8 @@ MEETING_MODELS = [
     "anthropic/claude-sonnet-5", "openai/gpt-5.4", "x-ai/grok-4.5",
 ]
 ASSISTANT_PROVIDERS = [
-    ("Claude Code", "claude"), ("Codex", "codex"), ("OpenRouter", "openrouter"),
+    ("Claude Code", "claude"), ("Codex", "codex"),
+    ("OpenRouter", "openrouter"), ("OpenCode Go", "opencode"),
 ]
 # Aliases resolve to the newest model of that name, so they age better than an
 # id does; a full id can be typed in when a particular one is wanted.
@@ -84,6 +86,14 @@ CODEX_MODELS = ["gpt-5.4-codex", "gpt-5.4", "o4-mini"]
 ASSISTANT_OR_MODELS = [
     "google/gemini-3.5-flash", "anthropic/claude-sonnet-5", "openai/gpt-5.4",
     "x-ai/grok-4.5", "google/gemini-3.1-pro-preview",
+]
+# The models OpenCode Go serves over /chat/completions. The ones its catalog
+# lists under /responses or /messages (Grok, GPT-5.6 Luna, MiniMax, Qwen) are
+# not offered here, because Dikte speaks only the chat endpoint.
+OPENCODE_MODELS = [
+    "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.2", "glm-5.1",
+    "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "longcat-2.0",
+    "mimo-v2.5", "mimo-v2.5-pro", "hy3", "ox-alpha-free",
 ]
 # What Claude Code may do without being able to ask. It cannot ask: there is no
 # window to answer in, so a mode that would have prompted denies instead.
@@ -519,7 +529,7 @@ class SettingsWindow(QDialog):
     # hears about it from here rather than waiting for its own next check.
     update_found = pyqtSignal(object)
 
-    _models_loaded = pyqtSignal(list, str)
+    _models_loaded = pyqtSignal(list, str, str)
     _transcribe_models_loaded = pyqtSignal(list, str)
     # Which key was tested, whether it worked, and what to write under it.
     _test_done = pyqtSignal(str, bool, str)
@@ -746,6 +756,9 @@ class SettingsWindow(QDialog):
         self.openrouter_key = self._key_row(
             keys_form, "openrouter", t("sk-or-… (falls back to OPENROUTER_API_KEY)"),
             self._test_openrouter)
+        self.opencode_key = self._key_row(
+            keys_form, "opencode", t("(falls back to OPENCODE_API_KEY)"),
+            self._test_opencode, service="OpenCode Go")
         outer.addWidget(keys)
 
         stt = QGroupBox(t("Speech to text"))
@@ -818,7 +831,7 @@ class SettingsWindow(QDialog):
         for label, value in CLEANUP_PROVIDERS:
             self.cleanup_provider.addItem(t(label), value)
         self.cleanup_provider.setToolTip(t(
-            "OpenRouter is the quickest and the only one that needs nothing "
+            "OpenRouter and OpenCode Go are the quickest and need nothing "
             "installed. llama.cpp runs here, on a model downloaded below. Claude "
             "Code and Codex clean up on the subscription you already have, "
             "without a second key, and take a few seconds longer because each "
@@ -847,6 +860,11 @@ class SettingsWindow(QDialog):
         self.cleanup_codex_model.setEditable(True)
         self.cleanup_codex_model.addItems([t("Codex's own default")] + CODEX_MODELS)
         orr_form.addRow(t("Model"), self.cleanup_codex_model)
+
+        self.cleanup_opencode_model = QComboBox()
+        self.cleanup_opencode_model.setEditable(True)
+        self.cleanup_opencode_model.addItems(OPENCODE_MODELS)
+        orr_form.addRow(t("Model"), self.cleanup_opencode_model)
 
         self.cleanup_reasoning = QComboBox()
         for label, value in REASONING_LEVELS:
@@ -1043,6 +1061,23 @@ class SettingsWindow(QDialog):
         or_note.setWordWrap(True)
         or_form.addRow(or_note)
         layout.addWidget(self.openrouter_box)
+
+        self.opencode_box = QGroupBox("OpenCode Go")
+        og_form = QFormLayout(self.opencode_box)
+        self.assistant_opencode_model = QComboBox()
+        self.assistant_opencode_model.setEditable(True)
+        self.assistant_opencode_model.addItems(OPENCODE_MODELS)
+        og_form.addRow(t("Model"), self.assistant_opencode_model)
+        og_note = QLabel(t(
+            "A plain question and a plain answer, over the OpenCode Go key you "
+            "already have. It runs no commands, opens no files and reaches none "
+            "of your services, so it can tell you what the capital of Peru is "
+            "but not what is in your calendar. Working directory and permissions "
+            "above mean nothing here."
+        ))
+        og_note.setWordWrap(True)
+        og_form.addRow(og_note)
+        layout.addWidget(self.opencode_box)
 
         thread = QGroupBox(t("The conversation"))
         thread_form = QFormLayout(thread)
@@ -1515,7 +1550,7 @@ class SettingsWindow(QDialog):
             box.lineEdit().setPlaceholderText(placeholder)
         return box
 
-    def _key_row(self, form, provider, placeholder, tester):
+    def _key_row(self, form, provider, placeholder, tester, service=""):
         """A key field, its Test button and the line the answer lands on.
 
         The field and the pair the answer needs are filed under the provider's
@@ -1529,7 +1564,8 @@ class SettingsWindow(QDialog):
         button.clicked.connect(tester)
         answer = QLabel("")
         answer.setWordWrap(True)
-        form.addRow(cfg.TRANSCRIBERS[provider].service, self._row(field, button))
+        form.addRow(service or cfg.TRANSCRIBERS[provider].service,
+                    self._row(field, button))
         form.addRow("", answer)
         self._key_fields[provider] = field
         self._testers[provider] = (button, answer)
@@ -1603,6 +1639,7 @@ class SettingsWindow(QDialog):
         for name, who in cfg.TRANSCRIBERS.items():
             self._key_fields[name].setText(conf[who.key])
             self._models[name] = conf[who.model]
+        self._key_fields["opencode"].setText(conf["opencode_api_key"])
         self._shown_provider = ""
         self._select_data(self.transcribe_provider, conf["transcribe_provider"])
         self._provider_changed()  # selecting index 0 fires no signal
@@ -1617,6 +1654,7 @@ class SettingsWindow(QDialog):
         self.cleanup_codex_model.setCurrentText(
             conf["cleanup_codex_model"] or t("Codex's own default")
         )
+        self.cleanup_opencode_model.setCurrentText(conf["cleanup_opencode_model"])
         self._select_data(self.cleanup_provider, conf["cleanup_provider"])
         self._cleanup_provider_changed()  # selecting index 0 fires no signal
         self._select_data(self.cleanup_reasoning, conf["cleanup_reasoning"])
@@ -1636,6 +1674,7 @@ class SettingsWindow(QDialog):
         self.assistant_codex_model.setCurrentText(conf["assistant_codex_model"])
         self._select_data(self.assistant_codex_sandbox, conf["assistant_codex_sandbox"])
         self.assistant_openrouter_model.setCurrentText(conf["assistant_openrouter_model"])
+        self.assistant_opencode_model.setCurrentText(conf["assistant_opencode_model"])
         self._assistant_provider_changed()  # selecting index 0 fires no signal
         self._select_data(self.assistant_reasoning, conf["assistant_reasoning"])
         self.assistant_dir.setText(conf["assistant_dir"])
@@ -1701,6 +1740,7 @@ class SettingsWindow(QDialog):
         for name, who in cfg.TRANSCRIBERS.items():
             conf[who.key] = self._key_fields[name].text().strip()
             conf[who.model] = self._models[name].strip() or cfg.DEFAULTS[who.model]
+        conf["opencode_api_key"] = self._key_fields["opencode"].text().strip()
         conf["local_model"] = self.local_whisper.selected()
         conf["local_gpu"] = self.local_gpu.isChecked()
         conf["local_preload"] = self.local_preload.isChecked()
@@ -1714,6 +1754,10 @@ class SettingsWindow(QDialog):
         codex_cleanup_model = self.cleanup_codex_model.currentText().strip()
         conf["cleanup_codex_model"] = (
             "" if codex_cleanup_model == t("Codex's own default") else codex_cleanup_model
+        )
+        conf["cleanup_opencode_model"] = (
+            self.cleanup_opencode_model.currentText().strip()
+            or cfg.DEFAULTS["cleanup_opencode_model"]
         )
         conf["cleanup_reasoning"] = self.cleanup_reasoning.currentData() or ""
         conf["local_llm_model"] = self.local_llm.selected()
@@ -1747,6 +1791,10 @@ class SettingsWindow(QDialog):
         conf["assistant_openrouter_model"] = (
             self.assistant_openrouter_model.currentText().strip()
             or cfg.DEFAULTS["assistant_openrouter_model"]
+        )
+        conf["assistant_opencode_model"] = (
+            self.assistant_opencode_model.currentText().strip()
+            or cfg.DEFAULTS["assistant_opencode_model"]
         )
         conf["assistant_reasoning"] = self.assistant_reasoning.currentData() or ""
         conf["assistant_dir"] = self.assistant_dir.text().strip()
@@ -1854,26 +1902,52 @@ class SettingsWindow(QDialog):
     def _load_models(self):
         self.refresh_models.setEnabled(False)
         self.models_label.setText(t("Fetching model list…"))
+        # Whichever provider is selected for cleanup is the one whose models are
+        # fetched, so the list lands in the box of the provider on screen.
+        provider = self.cleanup_provider.currentData() or "openrouter"
+        if provider == "opencode":
+            key = (self.opencode_key.text().strip() or self.conf.opencode_key())
+            base = self.conf["opencode_base_url"]
+
+            def work():
+                try:
+                    self._models_loaded.emit(
+                        api.openai_models(key, base, "OpenCode Go"), "", provider)
+                except api.ApiError as exc:
+                    self._models_loaded.emit([], str(exc), provider)
+
+            threading.Thread(target=work, daemon=True).start()
+            return
         key = self.openrouter_key.text().strip() or self.conf.openrouter_key()
 
         def work():
             try:
-                self._models_loaded.emit(api.openrouter_models(key), "")
+                self._models_loaded.emit(api.openrouter_models(key), "", provider)
             except api.ApiError as exc:
-                self._models_loaded.emit([], str(exc))
+                self._models_loaded.emit([], str(exc), provider)
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _on_models_loaded(self, models, error):
+    def _on_models_loaded(self, models, error, provider):
         self.refresh_models.setEnabled(True)
         if error:
             self.models_label.setText(t("Could not fetch the list: {error}", error=error))
             return
-        for combo in (self.cleanup_model, self.meeting_model):
-            current = combo.currentText()
-            combo.clear()
-            combo.addItems(models)
-            combo.setCurrentText(current)
+        if provider == "opencode":
+            combo = self.cleanup_opencode_model
+        else:
+            combo = self.cleanup_model
+        current = combo.currentText()
+        combo.clear()
+        combo.addItems(models)
+        combo.setCurrentText(current)
+        if provider == "openrouter":
+            # The minutes summary runs on the same key, so the meeting box is
+            # filled from the same list.
+            current = self.meeting_model.currentText()
+            self.meeting_model.clear()
+            self.meeting_model.addItems(models)
+            self.meeting_model.setCurrentText(current)
         self.models_label.setText(t("{count} models loaded.", count=len(models)))
 
     def _test_openai(self):
@@ -1894,8 +1968,20 @@ class SettingsWindow(QDialog):
         key, _ = self._typed_key("openrouter")
         self._test_key("openrouter", lambda: api.openrouter_key_status(key))
 
+    def _test_opencode(self):
+        key, base = self._typed_key("opencode")
+        self._test_key("opencode", lambda: t(
+            "Connection works. {count} models visible.",
+            count=len(api.openai_models(key, base, "OpenCode Go")),
+        ))
+
     def _typed_key(self, provider):
         """(key, base URL) for a provider, preferring what is in the field now."""
+        if provider == "opencode":
+            # The one key that is not in the TRANSCRIBERS table: it pays for
+            # cleanup and the agent rather than for speech to text.
+            typed = self._key_fields["opencode"].text().strip()
+            return typed or self.conf.opencode_key(), self.conf["opencode_base_url"]
         who = cfg.TRANSCRIBERS[provider]
         typed = self._key_fields[provider].text().strip()
         return typed or self.conf.api_key(who.key), self.conf[who.url]
@@ -2118,6 +2204,8 @@ class SettingsWindow(QDialog):
                                         provider == "claude")
         self.cleanup_form.setRowVisible(self.cleanup_codex_model,
                                         provider == "codex")
+        self.cleanup_form.setRowVisible(self.cleanup_opencode_model,
+                                        provider == "opencode")
         self.cleanup_form.setRowVisible(self.cleanup_reasoning,
                                         provider != "local")
         self.cleanup_form.setRowVisible(self.local_llm, provider == "local")
@@ -2126,6 +2214,8 @@ class SettingsWindow(QDialog):
         found = shutil.which(binary) if binary else ""
         if provider == "local":
             self.models_label.setText(t("Runs on this machine, on llama.cpp."))
+        elif provider == "opencode":
+            self.models_label.setText(t("Runs on OpenCode Go."))
         elif not binary:
             self.models_label.setText(t("Runs on OpenRouter."))
         elif found:
@@ -2142,6 +2232,7 @@ class SettingsWindow(QDialog):
         self.claude_box.setVisible(provider == "claude")
         self.codex_box.setVisible(provider == "codex")
         self.openrouter_box.setVisible(provider == "openrouter")
+        self.opencode_box.setVisible(provider == "opencode")
         self._refresh_assistant_status()
 
     def _refresh_assistant_status(self):
@@ -2149,9 +2240,14 @@ class SettingsWindow(QDialog):
         binary = assistant.executable(provider)
         found = shutil.which(binary) if binary else ""
         if not binary:
-            self.assistant_found.setText(
-                t("Needs no program installed, only the OpenRouter key.")
-            )
+            if provider == "opencode":
+                self.assistant_found.setText(
+                    t("Needs no program installed, only an OpenCode Go key.")
+                )
+            else:
+                self.assistant_found.setText(
+                    t("Needs no program installed, only the OpenRouter key.")
+                )
         elif found:
             self.assistant_found.setText(t("Found: {path}", path=found))
         else:

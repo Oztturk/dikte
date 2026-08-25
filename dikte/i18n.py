@@ -40,8 +40,10 @@ def t(text, /, **kwargs):
 # by the sentence, so it arrives already inflected. English takes the name as it
 # is and puts the preposition in the sentence, where it belongs.
 _TR_CASES = {
-    "dative": {"Claude": "Claude'a", "Codex": "Codex'e", "OpenRouter": "OpenRouter'a"},
-    "accusative": {"Claude": "Claude'u", "Codex": "Codex'i", "OpenRouter": "OpenRouter'ı"},
+    "dative": {"Claude": "Claude'a", "Codex": "Codex'e", "OpenRouter": "OpenRouter'a",
+               "OpenCode Go": "OpenCode Go'ya"},
+    "accusative": {"Claude": "Claude'u", "Codex": "Codex'i",
+                   "OpenRouter": "OpenRouter'ı", "OpenCode Go": "OpenCode Go'yu"},
 }
 
 
@@ -221,11 +223,15 @@ TR = {
     "sk-… (falls back to OPENAI_API_KEY)": "sk-… (boşsa OPENAI_API_KEY kullanılır)",
     "gsk_… (falls back to GROQ_API_KEY)": "gsk_… (boşsa GROQ_API_KEY kullanılır)",
     "sk-or-… (falls back to OPENROUTER_API_KEY)": "sk-or-… (boşsa OPENROUTER_API_KEY kullanılır)",
+    "(falls back to OPENCODE_API_KEY)": "(boşsa OPENCODE_API_KEY kullanılır)",
     "Test": "Test et",
     "Trying…": "Deneniyor…",
     "Runs on OpenRouter.": "OpenRouter üzerinde çalışır.",
+    "Runs on OpenCode Go.": "OpenCode Go üzerinde çalışır.",
     "Connection works. {count} audio models visible.":
         "Bağlantı tamam. {count} ses modeli görünüyor.",
+    "Connection works. {count} models visible.":
+        "Bağlantı tamam. {count} model görünüyor.",
     "Clean the transcript with a model": "Transkripti bir modelle temizle",
     "OpenRouter is the quickest and the only one that needs nothing installed. "
     "Claude Code and Codex clean up on the subscription you already have, "
@@ -235,6 +241,14 @@ TR = {
         "Claude Code ile Codex, temizliği hâlihazırda ödediğin abonelik üzerinden "
         "yapar, ikinci bir anahtar istemez; her biri bunun için bir oturum açtığından "
         "birkaç saniye daha uzun sürer.",
+    "OpenRouter and OpenCode Go are the quickest and need nothing installed. "
+    "Claude Code and Codex clean up on the subscription you already have, "
+    "without a second key, and take a few seconds longer because each one opens "
+    "a session to do it.":
+        "En hızlıları OpenRouter ve OpenCode Go'dur; kurulu bir program "
+        "istemezler. Claude Code ile Codex, temizliği hâlihazırda ödediğin "
+        "abonelik üzerinden yapar, ikinci bir anahtar istemez; her biri bunun "
+        "için bir oturum açtığından birkaç saniye daha uzun sürer.",
     "{binary} is not on your PATH, so cleanup would fail and the raw transcript "
     "would be pasted. Install it, or pick another one above.":
         "{binary} PATH'te değil; temizleme başarısız olur ve ham transkript "
@@ -541,6 +555,17 @@ TR = {
         "Yukarıdaki çalışma dizini ve izinler burada bir şey ifade etmez.",
     "Needs no program installed, only the OpenRouter key.":
         "Kurulu bir programa değil, yalnızca OpenRouter anahtarına ihtiyaç duyar.",
+    "A plain question and a plain answer, over the OpenCode Go key you already "
+    "have. It runs no commands, opens no files and reaches none of your "
+    "services, so it can tell you what the capital of Peru is but not what is "
+    "in your calendar. Working directory and permissions above mean nothing "
+    "here.":
+        "Elindeki OpenCode Go anahtarı üzerinden düz bir soru ve düz bir cevap. "
+        "Komut çalıştırmaz, dosya açmaz, servislerinin hiçbirine erişmez; yani "
+        "Peru'nun başkentini söyler ama takviminde ne olduğunu söyleyemez. "
+        "Yukarıdaki çalışma dizini ve izinler burada bir şey ifade etmez.",
+    "Needs no program installed, only an OpenCode Go key.":
+        "Kurulu bir programa değil, yalnızca bir OpenCode Go anahtarına ihtiyaç duyar.",
     "{binary} is not on your PATH, so this cannot run yet. Install it, or pick "
     "another one above.":
         "{binary} PATH'te değil, dolayısıyla bu henüz çalışamaz. Kur ya da "

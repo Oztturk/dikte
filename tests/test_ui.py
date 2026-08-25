@@ -244,6 +244,7 @@ class Settings(DikteTest):
         """An OpenRouter id and a Claude alias are not the same field."""
         window = self.window(cfg.Config())
         boxes = {"openrouter": window.cleanup_model_row,
+                 "opencode": window.cleanup_opencode_model,
                  "claude": window.cleanup_claude_model,
                  "codex": window.cleanup_codex_model}
         for provider, box in boxes.items():

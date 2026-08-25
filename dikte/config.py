@@ -385,6 +385,8 @@ DEFAULTS = {
     "groq_base_url": "https://api.groq.com/openai/v1",
     "openrouter_api_key": "",
     "openrouter_base_url": "https://openrouter.ai/api/v1",
+    "opencode_api_key": "",
+    "opencode_base_url": "https://opencode.ai/zen/go/v1",
     "transcribe_provider": "local",  # "local", or a key of TRANSCRIBERS
     "transcribe_model": "gpt-4o-transcribe",           # used when provider is openai
     "groq_transcribe_model": "whisper-large-v3-turbo",
@@ -410,6 +412,7 @@ DEFAULTS = {
     "cleanup_model": "google/gemini-3.5-flash-lite",
     "cleanup_claude_model": "haiku",   # Claude Code: an alias, or a full model id
     "cleanup_codex_model": "",         # empty -> whatever Codex is set to
+    "cleanup_opencode_model": "deepseek-v4-flash",
     "cleanup_reasoning": "",        # empty -> whatever the model does by default
 
     # --- llama.cpp, on this machine -----------------------------------------
@@ -488,6 +491,7 @@ DEFAULTS = {
     "assistant_codex_model": "",    # empty -> whatever Codex is set to
     "assistant_codex_sandbox": "workspace-write",
     "assistant_openrouter_model": "google/gemini-3.5-flash",
+    "assistant_opencode_model": "deepseek-v4-flash",
     "assistant_reasoning": "",      # empty -> the model's own default
     "assistant_dir": "",            # empty -> the home directory
     "assistant_prompt": "",         # empty -> language-specific default
@@ -588,6 +592,9 @@ class Config:
 
     def openrouter_key(self):
         return self.api_key("openrouter_api_key")
+
+    def opencode_key(self):
+        return self.api_key("opencode_api_key")
 
     def transcribe_target(self):
         """Key, endpoint and model for whichever provider does speech to text.

@@ -79,7 +79,11 @@ ASSISTANT_PROVIDERS = [
 # Aliases resolve to the newest model of that name, so they age better than an
 # id does; a full id can be typed in when a particular one is wanted.
 ASSISTANT_MODELS = ["sonnet", "opus", "haiku", "fable"]
-CODEX_MODELS = ["gpt-5.4-codex", "gpt-5.4", "o4-mini"]
+# What the Codex boxes offer before Codex itself has answered, and everything
+# they offer when it cannot: the real list comes from `codex debug models` when
+# the window opens, so this only has to be roughly right.
+CODEX_MODELS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+                "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"]
 # Starting points only; the box is editable and OpenRouter has hundreds.
 ASSISTANT_OR_MODELS = [
     "google/gemini-3.5-flash", "anthropic/claude-sonnet-5", "openai/gpt-5.4",
@@ -521,6 +525,7 @@ class SettingsWindow(QDialog):
 
     _models_loaded = pyqtSignal(list, str)
     _transcribe_models_loaded = pyqtSignal(list, str)
+    _codex_models_loaded = pyqtSignal(list)
     # Which key was tested, whether it worked, and what to write under it.
     _test_done = pyqtSignal(str, bool, str)
     # The release that was found, or None, and what went wrong instead.
@@ -577,6 +582,7 @@ class SettingsWindow(QDialog):
 
         self._models_loaded.connect(self._on_models_loaded)
         self._transcribe_models_loaded.connect(self._on_transcribe_models_loaded)
+        self._codex_models_loaded.connect(self._on_codex_models_loaded)
         self._test_done.connect(self._on_test_done)
         self._update_checked.connect(self._on_update_checked)
         self.transcriber.progress.connect(self._on_file_progress)
@@ -587,6 +593,7 @@ class SettingsWindow(QDialog):
             self.meetings.finished.connect(self._on_minutes_finished)
             self.meetings.failed.connect(self._on_minutes_failed)
         self._load()
+        self._load_codex_models()
         # Connected after the load, so that filling the boxes in is not taken
         # for the user ticking them.
         self.file_timestamps.toggled.connect(self._remember_file_choices)
@@ -1875,6 +1882,33 @@ class SettingsWindow(QDialog):
             combo.addItems(models)
             combo.setCurrentText(current)
         self.models_label.setText(t("{count} models loaded.", count=len(models)))
+
+    def _load_codex_models(self):
+        """Ask Codex which models it offers, off the interface thread.
+
+        No button and no network of ours: the CLI answers from its own cache in
+        well under a second. Skipped when Codex is not installed, which is also
+        when the built-in list stays on screen and nobody is running Codex
+        anyway.
+        """
+        if not shutil.which("codex"):
+            return
+
+        def work():
+            found = assistant.codex_models()
+            if found:
+                self._codex_models_loaded.emit(found)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_codex_models_loaded(self, models):
+        for combo in (self.cleanup_codex_model, self.assistant_codex_model):
+            current = combo.currentText()
+            combo.clear()
+            combo.addItem(t("Codex's own default"), "")
+            for name in models:
+                combo.addItem(name, name)
+            combo.setCurrentText(current)
 
     def _test_openai(self):
         key, base = self._typed_key("openai")

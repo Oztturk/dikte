@@ -133,6 +133,8 @@ class Settings(DikteTest):
                                             "_load_models"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_transcribe_models"))
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_codex_models"))
         # The local model boxes fetch their own list the moment they are shown,
         # from a thread, which is nobody's test failing but a real request.
         self.enterContext(mock.patch.object(settings_ui.LocalModelBox,
@@ -253,6 +255,19 @@ class Settings(DikteTest):
                          if not other.isHidden()]
                 self.assertEqual(shown, [provider])
                 self.assertFalse(box.isHidden())
+
+    def test_codex_answering_refills_both_of_its_boxes(self):
+        """The list Codex gave replaces the built-in one, in both places, and
+        neither loses what was already picked."""
+        conf = self.config(cleanup_codex_model="my-own-model")
+        window = self.window(conf)
+        window._on_codex_models_loaded(["gpt-6", "gpt-6-mini"])
+        for combo in (window.cleanup_codex_model, window.assistant_codex_model):
+            with self.subTest(combo=combo.objectName() or "combo"):
+                offered = [combo.itemText(i) for i in range(combo.count())]
+                self.assertEqual(offered[1:], ["gpt-6", "gpt-6-mini"])
+        self.assertEqual(window.cleanup_codex_model.currentText(),
+                         "my-own-model")
 
     def test_the_update_line_names_the_version_that_is_running(self):
         window = self.window(cfg.Config())
@@ -654,7 +669,9 @@ class MeetingSources(DikteTest):
                 only_these_tools(), \
                 mock.patch.object(settings_ui.SettingsWindow, "_load_models"), \
                 mock.patch.object(settings_ui.SettingsWindow,
-                                  "_load_transcribe_models"):
+                                  "_load_transcribe_models"), \
+                mock.patch.object(settings_ui.SettingsWindow,
+                                  "_load_codex_models"):
             window = settings_ui.SettingsWindow(cfg.Config())
         self.addCleanup(window.deleteLater)
         self.addCleanup(window.close)
@@ -683,6 +700,9 @@ class LocalModels(DikteTest):
         # "nothing can transcribe" question from its real binary and model.
         self.patch_attr(ggml, "BIN_DIR", self.path("bin"))
         self.patch_attr(ggml, "MODELS_DIR", self.path("models"))
+        # And one with Codex on it would ask it for its model list.
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_codex_models"))
 
     def window(self, conf):
         window = settings_ui.SettingsWindow(conf)

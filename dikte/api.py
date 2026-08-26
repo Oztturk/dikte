@@ -262,9 +262,22 @@ def _request(url, data, headers, timeout=120, aborter=None):
 
 
 def _extract_error(body):
+    """The line worth showing out of a failed request's body.
+
+    Whatever comes back, this has to end in a string: it is called while an
+    ApiError is being raised, and an exception thrown here would escape the
+    `except ApiError` every caller is holding and lose the dictation the raw
+    transcript would otherwise have been pasted from.
+    """
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
+        return body[:300]
+    if isinstance(payload, list):
+        # Google answers some failures with an array holding the object the
+        # other providers send on its own.
+        payload = next((item for item in payload if isinstance(item, dict)), None)
+    if not isinstance(payload, dict):
         return body[:300]
     err = payload.get("error")
     if isinstance(err, dict):

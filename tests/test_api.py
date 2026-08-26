@@ -119,8 +119,21 @@ class ExtractError(unittest.TestCase):
         body = json.dumps({"error": {"code": 42}})
         self.assertIn("42", api._extract_error(body))
 
+    def test_an_error_wrapped_in_an_array(self):
+        """Google's 503 arrives this way, and .get() on a list raises."""
+        body = json.dumps([{"error": {"code": 503,
+                                      "message": "The model is overloaded."}}])
+        self.assertEqual(api._extract_error(body), "The model is overloaded.")
+
     def test_a_body_that_is_not_json(self):
         self.assertEqual(api._extract_error("<html>502</html>"), "<html>502</html>")
+
+    def test_no_shape_at_all_still_comes_back_as_a_string(self):
+        """It runs while an ApiError is being raised: throwing here would
+        escape the `except ApiError` holding the raw transcript."""
+        for body in ("[]", "[1, 2]", '"a string"', "null", "17"):
+            with self.subTest(body=body):
+                self.assertIsInstance(api._extract_error(body), str)
 
     def test_a_wall_of_html_is_cut_short(self):
         self.assertEqual(len(api._extract_error("x" * 5000)), 300)

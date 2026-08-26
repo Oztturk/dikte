@@ -404,11 +404,11 @@ class Cleanup(DikteTest):
         self.assertEqual(payload["reasoning_effort"], "low")
         self.assertNotIn("reasoning", payload)
 
-    def test_gemini_is_told_to_stop_thinking_rather_than_left_alone(self):
-        """"none" is the one level worth sending: Flash thinks by default."""
+    def test_off_is_asked_for_as_the_lowest_rung_google_actually_has(self):
+        """Sending "none" is a 400, and Flash left alone thinks."""
         _, calls = self.call(chat_reply("Hello."), reasoning="none",
                              provider="gemini", service="Google AI Studio")
-        self.assertEqual(sent_json(calls[0])["reasoning_effort"], "none")
+        self.assertEqual(sent_json(calls[0])["reasoning_effort"], "minimal")
 
     def test_a_rung_google_does_not_have_lands_on_the_nearest_one(self):
         for asked in ("xhigh", "max"):

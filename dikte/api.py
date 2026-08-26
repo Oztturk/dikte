@@ -469,11 +469,13 @@ def transcribe_segments(target, audio_path, language="", prompt="", timeout=300,
     return out
 
 
-# The settings window offers OpenRouter's ladder, whose top two rungs Google
-# has never heard of. Sent as they are the request is refused, which costs the
-# cleanup rather than the dictation, so they land on the nearest rung that
-# exists instead.
-GEMINI_EFFORT = {"xhigh": "high", "max": "high"}
+# The settings window offers OpenRouter's ladder, and Google has neither end of
+# it: "none" is refused outright with a 400, and there is nothing above "high".
+# Both ends land on the nearest rung that does exist, which costs the cleanup
+# rather than the dictation when it is wrong. "minimal" is where "off" goes, and
+# it is the quickest of them by a wide margin, which is what cleanup wants
+# anyway.
+GEMINI_EFFORT = {"none": "minimal", "xhigh": "high", "max": "high"}
 
 
 def _thinking(payload, provider, reasoning):
@@ -494,10 +496,10 @@ def _thinking(payload, provider, reasoning):
         payload["chat_template_kwargs"] = {"enable_thinking": reasoning != "none"}
     elif provider == "gemini":
         # Google's compatibility layer takes OpenAI's flat field rather than
-        # OpenRouter's object, and "none" is how thinking is turned off there,
-        # so it is the one level worth sending rather than skipping: a Flash
-        # model left to think spends exactly the second this provider was
-        # chosen to save.
+        # OpenRouter's object, and it has no word for off, so "none" is asked
+        # for as the lowest rung it has rather than skipped: a Flash model left
+        # to decide for itself thinks, and thinking about a comma is the second
+        # this provider was chosen to save.
         payload["reasoning_effort"] = GEMINI_EFFORT.get(reasoning, reasoning)
     elif reasoning != "none":
         # The thinking itself is never shown, so ask for it to be left out.

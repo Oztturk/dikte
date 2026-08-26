@@ -116,7 +116,7 @@ class GoogleAiStudio(DikteTest):
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
         payload = sent_json(calls[0])
         self.assertEqual(payload["model"], "gemini-3.5-flash-lite")
-        self.assertEqual(payload["reasoning_effort"], "none")
+        self.assertEqual(payload["reasoning_effort"], "minimal")
         self.assertIn("uh, done", payload["messages"][1]["content"])
 
     def test_the_key_travels_as_a_bearer_token(self):

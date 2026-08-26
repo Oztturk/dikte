@@ -162,7 +162,8 @@ class Pipeline(QObject):
                 "cleanup_error": warning,
                 "mode": "ask" if ask else "",
                 "question": question,
-                "assistant_model": conf["assistant_model"] if ask else "",
+                "assistant": assistant.provider(conf) if ask else "",
+                "assistant_model": assistant.model(conf) if ask else "",
                 "raw": raw,
                 "text": text,
             })

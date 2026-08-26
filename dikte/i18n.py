@@ -40,8 +40,14 @@ def t(text, /, **kwargs):
 # by the sentence, so it arrives already inflected. English takes the name as it
 # is and puts the preposition in the sentence, where it belongs.
 _TR_CASES = {
-    "dative": {"Claude": "Claude'a", "Codex": "Codex'e", "OpenRouter": "OpenRouter'a"},
-    "accusative": {"Claude": "Claude'u", "Codex": "Codex'i", "OpenRouter": "OpenRouter'ı"},
+    "dative": {
+        "Claude": "Claude'a", "Codex": "Codex'e", "OpenRouter": "OpenRouter'a",
+        "Google AI Studio": "Google AI Studio'ya", "Antigravity": "Antigravity'ye",
+    },
+    "accusative": {
+        "Claude": "Claude'u", "Codex": "Codex'i", "OpenRouter": "OpenRouter'ı",
+        "Google AI Studio": "Google AI Studio'yu", "Antigravity": "Antigravity'yi",
+    },
 }
 
 
@@ -221,26 +227,33 @@ TR = {
     "sk-… (falls back to OPENAI_API_KEY)": "sk-… (boşsa OPENAI_API_KEY kullanılır)",
     "gsk_… (falls back to GROQ_API_KEY)": "gsk_… (boşsa GROQ_API_KEY kullanılır)",
     "sk-or-… (falls back to OPENROUTER_API_KEY)": "sk-or-… (boşsa OPENROUTER_API_KEY kullanılır)",
+    "(falls back to GEMINI_API_KEY)": "(boşsa GEMINI_API_KEY kullanılır)",
     "Test": "Test et",
     "Trying…": "Deneniyor…",
     "Runs on OpenRouter.": "OpenRouter üzerinde çalışır.",
+    "Runs on Google AI Studio.": "Google AI Studio üzerinde çalışır.",
     "Connection works. {count} audio models visible.":
         "Bağlantı tamam. {count} ses modeli görünüyor.",
+    "Connection works. {count} models visible.":
+        "Bağlantı tamam. {count} model görünüyor.",
     "Clean the transcript with a model": "Transkripti bir modelle temizle",
-    "OpenRouter is the quickest and the only one that needs nothing installed. "
-    "Claude Code and Codex clean up on the subscription you already have, "
-    "without a second key, and take a few seconds longer because each one opens "
-    "a session to do it.":
-        "En hızlısı OpenRouter'dır ve kurulu bir program istemeyen tek seçenektir. "
-        "Claude Code ile Codex, temizliği hâlihazırda ödediğin abonelik üzerinden "
-        "yapar, ikinci bir anahtar istemez; her biri bunun için bir oturum açtığından "
-        "birkaç saniye daha uzun sürer.",
+    "OpenRouter and Google AI Studio are the quick ones that need nothing "
+    "installed. llama.cpp runs here, on a model downloaded below. Claude Code, "
+    "Codex and Antigravity clean up on a subscription you already have, without "
+    "a second key, and take a few seconds longer because each opens a session "
+    "to do it.":
+        "OpenRouter ile Google AI Studio kurulum istemeyen hızlı seçeneklerdir. "
+        "llama.cpp burada, aşağıdan indirilen bir modelle çalışır. Claude Code, "
+        "Codex ve Antigravity temizliği hâlihazırda sahip olduğun bir abonelik "
+        "üzerinden, ikinci anahtar olmadan yapar; her biri bunun için bir oturum "
+        "açtığından birkaç saniye daha uzun sürer.",
     "{binary} is not on your PATH, so cleanup would fail and the raw transcript "
     "would be pasted. Install it, or pick another one above.":
         "{binary} PATH'te değil; temizleme başarısız olur ve ham transkript "
         "yapıştırılır. Kur ya da yukarıdan başka birini seç.",
     "Thinking": "Düşünme",
     "Model's own default": "Modelin kendi varsayılanı",
+    "Antigravity's own default": "Antigravity'nin kendi varsayılanı",
     "Off": "Kapalı",
     "Minimal": "En az",
     "Low": "Düşük",
@@ -506,15 +519,15 @@ TR = {
     "This shortcut records the same way dictation does, but the transcript is "
     "not what gets pasted. It goes to an agent as a command, and what comes "
     "back is pasted instead: the answer to a question, or a sentence saying "
-    "what was done. Claude Code and Codex run as the session you would have "
-    "opened yourself, with your skills, your connected services and your "
-    "account.":
+    "what was done. Claude Code, Codex and Antigravity run as the session you "
+    "would have opened yourself, with your skills, your connected services and "
+    "your account.":
         "Bu kısayol dikte ile aynı şekilde kaydeder, ama yapıştırılan şey "
         "transkript değildir. Transkript bir ajana komut olarak gider ve yerine "
         "oradan döneni yapıştırılır: bir sorunun cevabı ya da ne yapıldığını "
-        "söyleyen bir cümle. Claude Code ve Codex, kendi açacağın oturumun "
-        "aynısı olarak çalışır: skill'lerinle, bağlı servislerinle ve kendi "
-        "hesabınla.",
+        "söyleyen bir cümle. Claude Code, Codex ve Antigravity kendi açacağın "
+        "oturumun aynısı olarak çalışır: skill'lerinle, bağlı servislerinle "
+        "ve kendi hesabınla.",
     "How it runs": "Nasıl çalışıyor",
     "Runs on": "Şunun üstünde çalışır",
     "More thinking is slower, and you are standing in front of the screen while "
@@ -541,6 +554,13 @@ TR = {
         "Yukarıdaki çalışma dizini ve izinler burada bir şey ifade etmez.",
     "Needs no program installed, only the OpenRouter key.":
         "Kurulu bir programa değil, yalnızca OpenRouter anahtarına ihtiyaç duyar.",
+    "Antigravity has neither a permission mode nor a sandbox to hand it, so "
+    "what it may do without asking is whatever its own allow-rules say. The "
+    "Permissions and Sandbox boxes above belong to the other two; the working "
+    "directory still applies.":
+        "Antigravity'ye verilebilecek bir izin kipi ya da sandbox yok; sormadan "
+        "ne yapabileceğini kendi allow-rule'ları belirler. Yukarıdaki İzinler ve "
+        "Sandbox kutuları diğer ikisine ait; çalışma dizini burada da geçerli.",
     "{binary} is not on your PATH, so this cannot run yet. Install it, or pick "
     "another one above.":
         "{binary} PATH'te değil, dolayısıyla bu henüz çalışamaz. Kur ya da "
@@ -595,7 +615,7 @@ TR = {
     "configuration already says.":
         "Her komutla birlikte ajana söylenir, kendi yapılandırmanın zaten "
         "söylediklerinin üstüne eklenir.",
-    "  ·  asked Claude: {question}": "  ·  Claude'a soruldu: {question}",
+    "  ·  asked {who}: {question}": "  ·  {who} soruldu: {question}",
 
     # --- meetings: tray and pipeline ---------------------------------------
     "Record a meeting": "Toplantı kaydet",

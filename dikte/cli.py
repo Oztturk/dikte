@@ -227,7 +227,8 @@ def cmd_ask(opts):
         conf["assistant_provider"] = opts.provider
     if opts.model:
         key = {"claude": "assistant_model", "codex": "assistant_codex_model",
-               "openrouter": "assistant_openrouter_model"}[assistant.provider(conf)]
+               "openrouter": "assistant_openrouter_model",
+               "agy": "assistant_agy_model"}[assistant.provider(conf)]
         conf[key] = opts.model
     if opts.dir:
         conf["assistant_dir"] = opts.dir
@@ -266,7 +267,8 @@ def cmd_ask(opts):
         "cleanup_error": warning,
         "mode": "ask",
         "question": text,
-        "assistant_model": conf["assistant_model"],
+        "assistant": assistant.provider(conf),
+        "assistant_model": assistant.model(conf),
         "raw": text,
         "text": answer,
     })
@@ -519,7 +521,7 @@ def cmd_history_clear(opts):
 
 # --- settings ---------------------------------------------------------------
 
-SECRET_KEYS = ("openai_api_key", "openrouter_api_key")
+SECRET_KEYS = ("openai_api_key", "openrouter_api_key", "gemini_api_key")
 
 
 def _mask(key, value):
@@ -709,6 +711,14 @@ def cmd_test_key(opts):
             results[name] = {"ok": True, "message": message}
         except api.ApiError as exc:
             results[name] = {"ok": False, "message": str(exc)}
+    if opts.which in ("gemini", "all"):
+        try:
+            count = len(api.gemini_models(conf.gemini_key(),
+                                          conf["gemini_base_url"]))
+            message = f"connection works, {count} models visible"
+            results["gemini"] = {"ok": True, "message": message}
+        except api.ApiError as exc:
+            results["gemini"] = {"ok": False, "message": str(exc)}
     everything_ok = all(item["ok"] for item in results.values())
     lines = [f"{'✓' if item['ok'] else '✗'} {name}: {item['message']}"
              for name, item in results.items()]
@@ -869,13 +879,22 @@ def cmd_doctor(opts):
     programs = {name: shutil.which(name) or "" for name in wanted if name}
     target = conf.transcribe_target()
     cleaner = cleanup.provider(conf)
+    cleanup_binary = cleanup.executable(cleaner)
+    # Only the two that answer over HTTP have a key worth looking at. A CLI has
+    # a program to find instead, and the model on this machine has neither, so
+    # "no key" there has to read as beside the point rather than as one that has
+    # gone missing.
+    cleanup_service, cleanup_key = {
+        "openrouter": ("OpenRouter", conf.openrouter_key()),
+        "gemini": ("Google AI Studio", conf.gemini_key()),
+    }.get(cleaner, ("", ""))
     checks = {
         "programs": programs,
         "transcription": {"provider": target.provider, "model": target.model,
                           "key": bool(target.api_key)},
         "cleanup": {"enabled": conf["cleanup_enabled"], "provider": cleaner,
                     "model": cleanup.model(conf),
-                    "key": bool(conf.openrouter_key())},
+                    "key": bool(cleanup_key) if cleanup_service else None},
         "agent": {"provider": assistant.provider(conf),
                   "directory": assistant.working_dir(conf)},
         "running": ipc.send("status") is not None,
@@ -885,11 +904,13 @@ def cmd_doctor(opts):
     lines += [
         f"{'✓' if target.api_key else '✗'} {target.service} key, transcribing on "
         f"{target.model}",
-        # Cleanup on a CLI needs no key, so what is checked is the program.
-        (f"{'✓' if conf.openrouter_key() else '✗'} OpenRouter key, cleaning up on "
-         f"{conf['cleanup_model']}") if cleaner == "openrouter" else
-        (f"{'✓' if programs[cleanup.executable(cleaner)] else '✗'} "
-         f"{cleanup.executable(cleaner)}, cleaning up on {cleanup.model(conf)}"),
+        # Cleanup on a CLI needs no key, so what is checked is the program;
+        # cleanup on this machine has neither, and the model is the whole answer.
+        (f"{'✓' if cleanup_key else '✗'} {cleanup_service} key, cleaning up on "
+         f"{cleanup.model(conf)}") if cleanup_service else
+        (f"{'✓' if programs[cleanup_binary] else '✗'} {cleanup_binary}, "
+         f"cleaning up on {cleanup.model(conf)}") if cleanup_binary else
+        f"· cleaning up here, on {cleanup.model(conf)}",
         f"{'✓' if checks['running'] else '·'} application "
         + ("running" if checks["running"] else "not running"),
     ]
@@ -977,7 +998,7 @@ def build_parser():
     ask = leaf(subs, "ask", "put a command to the agent")
     ask.add_argument("text", nargs="*", help="the command; read from stdin, or "
                                              "recorded when there is none")
-    ask.add_argument("--provider", choices=("claude", "codex", "openrouter"),
+    ask.add_argument("--provider", choices=assistant.PROVIDERS,
                      help="just for this run")
     ask.add_argument("--model", help="just for this run")
     ask.add_argument("--dir", help="working directory, just for this run")
@@ -1100,7 +1121,7 @@ def build_parser():
     models.set_defaults(func=cmd_models)
     test = leaf(subs, "test-key", "check the API keys")
     test.add_argument("which", nargs="?", default="all",
-                      choices=("all", *cfg.TRANSCRIBERS))
+                      choices=("all", *cfg.TRANSCRIBERS, "gemini"))
     test.set_defaults(func=cmd_test_key)
     leaf(subs, "doctor", "keys, programs, and what is missing").set_defaults(func=cmd_doctor)
 

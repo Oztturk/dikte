@@ -28,6 +28,7 @@ from . import meeting
 from . import paste
 from . import update
 from .filetranscribe import FileTranscriber
+from . import i18n
 from .i18n import t
 
 UI_LANGUAGES = [("Automatic (system)", "auto"), ("Turkish", "tr"), ("English", "en")]
@@ -57,12 +58,24 @@ CLEANUP_MODELS = [
     "google/gemini-2.5-flash-lite", "anthropic/claude-haiku-4.5",
     "openai/gpt-5-mini", "meta-llama/llama-3.3-70b-instruct",
 ]
-# In the order they answer in. A request to OpenRouter is over in a second, a
-# model here takes a little longer and costs nothing, and the two CLIs the agent
-# can run on open a whole session to do the smaller job.
+GEMINI_MODELS = [
+    "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite", "gemini-3.5-flash", "gemini-2.5-flash",
+]
+# agy's model ids carry the reasoning effort in their suffix, which is why one
+# model appears here at more than one level. The same list seeds two boxes:
+# cleanup, which wants the bottom rung, and the agent, which sometimes does not.
+AGY_MODELS = [
+    "gemini-3.7-flash-low", "gemini-3.7-flash-medium", "gemini-3.7-flash-high",
+    "gemini-3.5-flash-low", "gemini-3.1-pro-low",
+]
+# In the order they answer in. The hosted requests are over in a second, a
+# model here takes a little longer and costs nothing, and the three CLIs the
+# agent can run on open a whole session to do the smaller job.
 CLEANUP_PROVIDERS = [
-    ("OpenRouter", "openrouter"), ("This machine (llama.cpp)", "local"),
-    ("Claude Code", "claude"), ("Codex", "codex"),
+    ("OpenRouter", "openrouter"), ("Google AI Studio", "gemini"),
+    ("This machine (llama.cpp)", "local"), ("Claude Code", "claude"),
+    ("Codex", "codex"), ("Antigravity", "agy"),
 ]
 # Cleaning up a sentence is the lightest thing either of them will ever be
 # asked, so the small model comes first.
@@ -74,7 +87,8 @@ MEETING_MODELS = [
     "anthropic/claude-sonnet-5", "openai/gpt-5.4", "x-ai/grok-4.5",
 ]
 ASSISTANT_PROVIDERS = [
-    ("Claude Code", "claude"), ("Codex", "codex"), ("OpenRouter", "openrouter"),
+    ("Claude Code", "claude"), ("Codex", "codex"), ("Antigravity", "agy"),
+    ("OpenRouter", "openrouter"),
 ]
 # Aliases resolve to the newest model of that name, so they age better than an
 # id does; a full id can be typed in when a particular one is wanted.
@@ -520,6 +534,7 @@ class SettingsWindow(QDialog):
     update_found = pyqtSignal(object)
 
     _models_loaded = pyqtSignal(list, str)
+    _gemini_models_loaded = pyqtSignal(list, str)
     _transcribe_models_loaded = pyqtSignal(list, str)
     # Which key was tested, whether it worked, and what to write under it.
     _test_done = pyqtSignal(str, bool, str)
@@ -576,6 +591,7 @@ class SettingsWindow(QDialog):
         self._size_to_screen(680, 640)
 
         self._models_loaded.connect(self._on_models_loaded)
+        self._gemini_models_loaded.connect(self._on_gemini_models_loaded)
         self._transcribe_models_loaded.connect(self._on_transcribe_models_loaded)
         self._test_done.connect(self._on_test_done)
         self._update_checked.connect(self._on_update_checked)
@@ -746,6 +762,9 @@ class SettingsWindow(QDialog):
         self.openrouter_key = self._key_row(
             keys_form, "openrouter", t("sk-or-… (falls back to OPENROUTER_API_KEY)"),
             self._test_openrouter)
+        self.gemini_key = self._key_row(
+            keys_form, "gemini", t("(falls back to GEMINI_API_KEY)"),
+            self._test_gemini, service="Google AI Studio")
         outer.addWidget(keys)
 
         stt = QGroupBox(t("Speech to text"))
@@ -818,11 +837,11 @@ class SettingsWindow(QDialog):
         for label, value in CLEANUP_PROVIDERS:
             self.cleanup_provider.addItem(t(label), value)
         self.cleanup_provider.setToolTip(t(
-            "OpenRouter is the quickest and the only one that needs nothing "
+            "OpenRouter and Google AI Studio are the quick ones that need nothing "
             "installed. llama.cpp runs here, on a model downloaded below. Claude "
-            "Code and Codex clean up on the subscription you already have, "
-            "without a second key, and take a few seconds longer because each "
-            "one opens a session to do it."
+            "Code, Codex and Antigravity clean up on a subscription you already "
+            "have, without a second key, and take a few seconds longer because "
+            "each opens a session to do it."
         ))
         self.cleanup_provider.currentIndexChanged.connect(self._cleanup_provider_changed)
         orr_form.addRow(t("Runs on"), self.cleanup_provider)
@@ -834,6 +853,15 @@ class SettingsWindow(QDialog):
         self.refresh_models.clicked.connect(self._load_models)
         self.cleanup_model_row = self._row(self.cleanup_model, self.refresh_models)
         orr_form.addRow(t("Model"), self.cleanup_model_row)
+
+        self.cleanup_gemini_model = QComboBox()
+        self.cleanup_gemini_model.setEditable(True)
+        self.cleanup_gemini_model.addItems(GEMINI_MODELS)
+        self.refresh_gemini_models = QPushButton(t("Fetch model list"))
+        self.refresh_gemini_models.clicked.connect(self._load_gemini_models)
+        self.cleanup_gemini_model_row = self._row(
+            self.cleanup_gemini_model, self.refresh_gemini_models)
+        orr_form.addRow(t("Model"), self.cleanup_gemini_model_row)
 
         # One row per provider rather than one box that means a different thing
         # in each: an OpenRouter id and a Claude alias do not belong in the same
@@ -847,6 +875,11 @@ class SettingsWindow(QDialog):
         self.cleanup_codex_model.setEditable(True)
         self.cleanup_codex_model.addItems([t("Codex's own default")] + CODEX_MODELS)
         orr_form.addRow(t("Model"), self.cleanup_codex_model)
+
+        self.cleanup_agy_model = QComboBox()
+        self.cleanup_agy_model.setEditable(True)
+        self.cleanup_agy_model.addItems([t("Antigravity's own default")] + AGY_MODELS)
+        orr_form.addRow(t("Model"), self.cleanup_agy_model)
 
         self.cleanup_reasoning = QComboBox()
         for label, value in REASONING_LEVELS:
@@ -931,9 +964,9 @@ class SettingsWindow(QDialog):
             "This shortcut records the same way dictation does, but the "
             "transcript is not what gets pasted. It goes to an agent as a "
             "command, and what comes back is pasted instead: the answer to a "
-            "question, or a sentence saying what was done. Claude Code and "
-            "Codex run as the session you would have opened yourself, with your "
-            "skills, your connected services and your account."
+            "question, or a sentence saying what was done. Claude Code, Codex "
+            "and Antigravity run as the session you would have opened yourself, "
+            "with your skills, your connected services and your account."
         ))
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -971,7 +1004,7 @@ class SettingsWindow(QDialog):
         dir_note.setWordWrap(True)
         how_form.addRow(dir_note)
 
-        # One scale for all three: how hard to think is one thing to want, and
+        # One scale for all four: how hard to think is one thing to want, and
         # each provider is handed the nearest rung it actually has.
         self.assistant_reasoning = QComboBox()
         for label, value in REASONING_LEVELS:
@@ -994,7 +1027,7 @@ class SettingsWindow(QDialog):
         layout.addWidget(how)
 
         # One box per provider, only the chosen one on screen: they have nothing
-        # in common past the model, and three sets of half-relevant fields would
+        # in common past the model, and four sets of half-relevant fields would
         # be worse than none.
         self.claude_box = QGroupBox(t("Claude Code"))
         claude_form = QFormLayout(self.claude_box)
@@ -1043,6 +1076,24 @@ class SettingsWindow(QDialog):
         or_note.setWordWrap(True)
         or_form.addRow(or_note)
         layout.addWidget(self.openrouter_box)
+
+        self.agy_box = QGroupBox(t("Antigravity"))
+        agy_form = QFormLayout(self.agy_box)
+        self.assistant_agy_model = QComboBox()
+        self.assistant_agy_model.setEditable(True)
+        self.assistant_agy_model.addItem(t("Antigravity's own default"), "")
+        for name in AGY_MODELS:
+            self.assistant_agy_model.addItem(name, name)
+        agy_form.addRow(t("Model"), self.assistant_agy_model)
+        agy_note = QLabel(t(
+            "Antigravity has neither a permission mode nor a sandbox to hand it, "
+            "so what it may do without asking is whatever its own allow-rules "
+            "say. The Permissions and Sandbox boxes above belong to the other "
+            "two; the working directory still applies."
+        ))
+        agy_note.setWordWrap(True)
+        agy_form.addRow(agy_note)
+        layout.addWidget(self.agy_box)
 
         thread = QGroupBox(t("The conversation"))
         thread_form = QFormLayout(thread)
@@ -1515,7 +1566,7 @@ class SettingsWindow(QDialog):
             box.lineEdit().setPlaceholderText(placeholder)
         return box
 
-    def _key_row(self, form, provider, placeholder, tester):
+    def _key_row(self, form, provider, placeholder, tester, service=""):
         """A key field, its Test button and the line the answer lands on.
 
         The field and the pair the answer needs are filed under the provider's
@@ -1529,7 +1580,8 @@ class SettingsWindow(QDialog):
         button.clicked.connect(tester)
         answer = QLabel("")
         answer.setWordWrap(True)
-        form.addRow(cfg.TRANSCRIBERS[provider].service, self._row(field, button))
+        label = service or cfg.TRANSCRIBERS[provider].service
+        form.addRow(label, self._row(field, button))
         form.addRow("", answer)
         self._key_fields[provider] = field
         self._testers[provider] = (button, answer)
@@ -1603,6 +1655,7 @@ class SettingsWindow(QDialog):
         for name, who in cfg.TRANSCRIBERS.items():
             self._key_fields[name].setText(conf[who.key])
             self._models[name] = conf[who.model]
+        self.gemini_key.setText(conf["gemini_api_key"])
         self._shown_provider = ""
         self._select_data(self.transcribe_provider, conf["transcribe_provider"])
         self._provider_changed()  # selecting index 0 fires no signal
@@ -1613,9 +1666,15 @@ class SettingsWindow(QDialog):
 
         self.cleanup_enabled.setChecked(conf["cleanup_enabled"])
         self.cleanup_model.setCurrentText(conf["cleanup_model"])
+        self.cleanup_gemini_model.setCurrentText(
+            conf["cleanup_gemini_model"] or cfg.DEFAULTS["cleanup_gemini_model"]
+        )
         self.cleanup_claude_model.setCurrentText(conf["cleanup_claude_model"])
         self.cleanup_codex_model.setCurrentText(
             conf["cleanup_codex_model"] or t("Codex's own default")
+        )
+        self.cleanup_agy_model.setCurrentText(
+            conf["cleanup_agy_model"] or t("Antigravity's own default")
         )
         self._select_data(self.cleanup_provider, conf["cleanup_provider"])
         self._cleanup_provider_changed()  # selecting index 0 fires no signal
@@ -1636,6 +1695,7 @@ class SettingsWindow(QDialog):
         self.assistant_codex_model.setCurrentText(conf["assistant_codex_model"])
         self._select_data(self.assistant_codex_sandbox, conf["assistant_codex_sandbox"])
         self.assistant_openrouter_model.setCurrentText(conf["assistant_openrouter_model"])
+        self.assistant_agy_model.setCurrentText(conf["assistant_agy_model"])
         self._assistant_provider_changed()  # selecting index 0 fires no signal
         self._select_data(self.assistant_reasoning, conf["assistant_reasoning"])
         self.assistant_dir.setText(conf["assistant_dir"])
@@ -1701,6 +1761,7 @@ class SettingsWindow(QDialog):
         for name, who in cfg.TRANSCRIBERS.items():
             conf[who.key] = self._key_fields[name].text().strip()
             conf[who.model] = self._models[name].strip() or cfg.DEFAULTS[who.model]
+        conf["gemini_api_key"] = self.gemini_key.text().strip()
         conf["local_model"] = self.local_whisper.selected()
         conf["local_gpu"] = self.local_gpu.isChecked()
         conf["local_preload"] = self.local_preload.isChecked()
@@ -1709,11 +1770,20 @@ class SettingsWindow(QDialog):
         conf["cleanup_enabled"] = self.cleanup_enabled.isChecked()
         conf["cleanup_provider"] = self.cleanup_provider.currentData() or "openrouter"
         conf["cleanup_model"] = self.cleanup_model.currentText().strip()
+        conf["cleanup_gemini_model"] = (
+            self.cleanup_gemini_model.currentText().strip()
+            or cfg.DEFAULTS["cleanup_gemini_model"]
+        )
         conf["cleanup_claude_model"] = (self.cleanup_claude_model.currentText().strip()
                                         or cfg.DEFAULTS["cleanup_claude_model"])
         codex_cleanup_model = self.cleanup_codex_model.currentText().strip()
         conf["cleanup_codex_model"] = (
             "" if codex_cleanup_model == t("Codex's own default") else codex_cleanup_model
+        )
+        agy_cleanup_model = self.cleanup_agy_model.currentText().strip()
+        conf["cleanup_agy_model"] = (
+            "" if agy_cleanup_model == t("Antigravity's own default")
+            else agy_cleanup_model
         )
         conf["cleanup_reasoning"] = self.cleanup_reasoning.currentData() or ""
         conf["local_llm_model"] = self.local_llm.selected()
@@ -1747,6 +1817,10 @@ class SettingsWindow(QDialog):
         conf["assistant_openrouter_model"] = (
             self.assistant_openrouter_model.currentText().strip()
             or cfg.DEFAULTS["assistant_openrouter_model"]
+        )
+        agy_model = self.assistant_agy_model.currentText().strip()
+        conf["assistant_agy_model"] = (
+            "" if agy_model == t("Antigravity's own default") else agy_model
         )
         conf["assistant_reasoning"] = self.assistant_reasoning.currentData() or ""
         conf["assistant_dir"] = self.assistant_dir.text().strip()
@@ -1876,6 +1950,30 @@ class SettingsWindow(QDialog):
             combo.setCurrentText(current)
         self.models_label.setText(t("{count} models loaded.", count=len(models)))
 
+    def _load_gemini_models(self):
+        self.refresh_gemini_models.setEnabled(False)
+        self.models_label.setText(t("Fetching model list…"))
+        key, base = self._typed_key("gemini")
+
+        def work():
+            try:
+                self._gemini_models_loaded.emit(api.gemini_models(key, base), "")
+            except api.ApiError as exc:
+                self._gemini_models_loaded.emit([], str(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_gemini_models_loaded(self, models, error):
+        self.refresh_gemini_models.setEnabled(True)
+        if error:
+            self.models_label.setText(t("Could not fetch the list: {error}", error=error))
+            return
+        current = self.cleanup_gemini_model.currentText()
+        self.cleanup_gemini_model.clear()
+        self.cleanup_gemini_model.addItems(models)
+        self.cleanup_gemini_model.setCurrentText(current)
+        self.models_label.setText(t("{count} models loaded.", count=len(models)))
+
     def _test_openai(self):
         key, base = self._typed_key("openai")
         self._test_key("openai", lambda: t(
@@ -1894,11 +1992,23 @@ class SettingsWindow(QDialog):
         key, _ = self._typed_key("openrouter")
         self._test_key("openrouter", lambda: api.openrouter_key_status(key))
 
+    def _test_gemini(self):
+        key, base = self._typed_key("gemini")
+        self._test_key("gemini", lambda: t(
+            "Connection works. {count} models visible.",
+            count=len(api.gemini_models(key, base)),
+        ))
+
     def _typed_key(self, provider):
         """(key, base URL) for a provider, preferring what is in the field now."""
-        who = cfg.TRANSCRIBERS[provider]
+        if provider in cfg.TRANSCRIBERS:
+            who = cfg.TRANSCRIBERS[provider]
+            key_setting, url_setting = who.key, who.url
+        else:
+            key_setting = f"{provider}_api_key"
+            url_setting = f"{provider}_base_url"
         typed = self._key_fields[provider].text().strip()
-        return typed or self.conf.api_key(who.key), self.conf[who.url]
+        return typed or self.conf.api_key(key_setting), self.conf[url_setting]
 
     def _test_key(self, provider, ask):
         """Run `ask` off the interface thread and write its answer under the key.
@@ -2114,10 +2224,14 @@ class SettingsWindow(QDialog):
         provider = self.cleanup_provider.currentData() or "openrouter"
         self.cleanup_form.setRowVisible(self.cleanup_model_row,
                                         provider == "openrouter")
+        self.cleanup_form.setRowVisible(self.cleanup_gemini_model_row,
+                                        provider == "gemini")
         self.cleanup_form.setRowVisible(self.cleanup_claude_model,
                                         provider == "claude")
         self.cleanup_form.setRowVisible(self.cleanup_codex_model,
                                         provider == "codex")
+        self.cleanup_form.setRowVisible(self.cleanup_agy_model,
+                                        provider == "agy")
         self.cleanup_form.setRowVisible(self.cleanup_reasoning,
                                         provider != "local")
         self.cleanup_form.setRowVisible(self.local_llm, provider == "local")
@@ -2126,6 +2240,8 @@ class SettingsWindow(QDialog):
         found = shutil.which(binary) if binary else ""
         if provider == "local":
             self.models_label.setText(t("Runs on this machine, on llama.cpp."))
+        elif provider == "gemini":
+            self.models_label.setText(t("Runs on Google AI Studio."))
         elif not binary:
             self.models_label.setText(t("Runs on OpenRouter."))
         elif found:
@@ -2142,6 +2258,7 @@ class SettingsWindow(QDialog):
         self.claude_box.setVisible(provider == "claude")
         self.codex_box.setVisible(provider == "codex")
         self.openrouter_box.setVisible(provider == "openrouter")
+        self.agy_box.setVisible(provider == "agy")
         self._refresh_assistant_status()
 
     def _refresh_assistant_status(self):
@@ -2270,7 +2387,11 @@ class SettingsWindow(QDialog):
                 # The text of an answer says nothing about what was asked, and
                 # out of that context half of them read like non sequiturs.
                 asked = (row.get("question") or row.get("raw") or "").replace("\n", " ")
-                header += t("  ·  asked Claude: {question}",
+                # Rows written before the provider was recorded are all Claude's,
+                # because it was the only one the history could name.
+                who = assistant.SERVICES.get(row.get("assistant"), "Claude")
+                header += t("  ·  asked {who}: {question}",
+                            who=i18n.name(who, "dative"),
                             question=asked[:60] + ("…" if len(asked) > 60 else ""))
             item = QListWidgetItem(f"{header}\n{preview}")
             item.setData(Qt.ItemDataRole.UserRole, row)

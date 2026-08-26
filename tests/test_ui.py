@@ -50,6 +50,7 @@ CHANGED = {
     "openai_api_key": "sk-test-key",
     "groq_api_key": "gsk-test-key",
     "openrouter_api_key": "sk-or-test-key",
+    "gemini_api_key": "AIza-test-key",
     "transcribe_provider": "openrouter",
     "transcribe_model": "whisper-1",
     "groq_transcribe_model": "whisper-large-v3",
@@ -59,6 +60,8 @@ CHANGED = {
     "cleanup_model": "some/other-model",
     "cleanup_claude_model": "opus",
     "cleanup_codex_model": "gpt-5",
+    "cleanup_gemini_model": "gemini-2.5-flash",
+    "cleanup_agy_model": "gemini-3.1-pro-low",
     "cleanup_reasoning": "high",
     "local_model": "ggml-small.bin",
     "local_gpu": False,
@@ -78,6 +81,7 @@ CHANGED = {
     "assistant_codex_model": "gpt-5",
     "assistant_codex_sandbox": "read-only",
     "assistant_openrouter_model": "some/agent-model",
+    "assistant_agy_model": "gemini-3.1-pro-low",
     "assistant_reasoning": "high",
     "assistant_dir": "/tmp",
     "assistant_timeout": 600,
@@ -754,3 +758,29 @@ class LocalModels(DikteTest):
         self.assertFalse(window.cleanup_form.isRowVisible(window.cleanup_model_row))
         # Its own thinking box, because the two default to opposite things.
         self.assertFalse(window.cleanup_form.isRowVisible(window.cleanup_reasoning))
+
+    def test_each_cleaner_brings_its_own_model_row_and_no_other(self):
+        window = self.window(cfg.Config())
+        rows = {"openrouter": window.cleanup_model_row,
+                "gemini": window.cleanup_gemini_model_row,
+                "claude": window.cleanup_claude_model,
+                "codex": window.cleanup_codex_model,
+                "agy": window.cleanup_agy_model}
+        for chosen, row in rows.items():
+            with self.subTest(provider=chosen):
+                window._select_data(window.cleanup_provider, chosen)
+                for name, other in rows.items():
+                    self.assertEqual(window.cleanup_form.isRowVisible(other),
+                                     name == chosen)
+
+    def test_each_agent_brings_its_own_box_and_no_other(self):
+        window = self.window(cfg.Config())
+        boxes = {"claude": window.claude_box, "codex": window.codex_box,
+                 "agy": window.agy_box, "openrouter": window.openrouter_box}
+        for chosen, box in boxes.items():
+            with self.subTest(provider=chosen):
+                window._select_data(window.assistant_provider, chosen)
+                for name, other in boxes.items():
+                    # isHidden rather than isVisible: the window itself is never
+                    # shown in a test, so nothing in it is ever visible.
+                    self.assertEqual(other.isHidden(), name != chosen)

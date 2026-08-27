@@ -232,22 +232,6 @@ TR = {
     "Connection works. {count} models visible.":
         "Bağlantı tamam. {count} model görünüyor.",
     "Clean the transcript with a model": "Transkripti bir modelle temizle",
-    "OpenRouter is the quickest and the only one that needs nothing installed. "
-    "Claude Code and Codex clean up on the subscription you already have, "
-    "without a second key, and take a few seconds longer because each one opens "
-    "a session to do it.":
-        "En hızlısı OpenRouter'dır ve kurulu bir program istemeyen tek seçenektir. "
-        "Claude Code ile Codex, temizliği hâlihazırda ödediğin abonelik üzerinden "
-        "yapar, ikinci bir anahtar istemez; her biri bunun için bir oturum açtığından "
-        "birkaç saniye daha uzun sürer.",
-    "OpenRouter and OpenCode Go are the quickest and need nothing installed. "
-    "Claude Code and Codex clean up on the subscription you already have, "
-    "without a second key, and take a few seconds longer because each one opens "
-    "a session to do it.":
-        "En hızlıları OpenRouter ve OpenCode Go'dur; kurulu bir program "
-        "istemezler. Claude Code ile Codex, temizliği hâlihazırda ödediğin "
-        "abonelik üzerinden yapar, ikinci bir anahtar istemez; her biri bunun "
-        "için bir oturum açtığından birkaç saniye daha uzun sürer.",
     "{binary} is not on your PATH, so cleanup would fail and the raw transcript "
     "would be pasted. Install it, or pick another one above.":
         "{binary} PATH'te değil; temizleme başarısız olur ve ham transkript "
@@ -826,16 +810,16 @@ TR = {
         "Düşünmeye eğitilmiş bir model, aksi söylenmedikçe düşünür; bir virgül "
         "için 300 token akıl yürütmek 300 token'lık bekleyiştir. Temizleme için "
         "doğrusu Kapalı.",
-    "OpenRouter is the quickest and the only one that needs nothing "
-    "installed. llama.cpp runs here, on a model downloaded below. Claude Code "
-    "and Codex clean up on the subscription you already have, without a "
-    "second key, and take a few seconds longer because each one opens a "
-    "session to do it.":
-        "OpenRouter en hızlısıdır ve kurulum istemeyen tek seçenektir. "
-        "llama.cpp burada, aşağıda indirilen bir modelle çalışır. Claude Code "
-        "ve Codex, ikinci bir anahtar olmadan zaten sahip olduğun abonelikle "
-        "temizler; her biri bunun için bir oturum açtığından birkaç saniye "
-        "daha sürer.",
+    "OpenRouter and OpenCode Go are the quickest and need nothing "
+    "installed. llama.cpp runs here, on a model downloaded below. Claude "
+    "Code and Codex clean up on the subscription you already have, "
+    "without a second key, and take a few seconds longer because each "
+    "one opens a session to do it.":
+        "En hızlıları OpenRouter ve OpenCode Go'dur; kurulu bir program "
+        "istemezler. llama.cpp burada, aşağıda indirilen bir modelle çalışır. "
+        "Claude Code ve Codex, ikinci bir anahtar olmadan zaten sahip olduğun "
+        "abonelikle temizler; her biri bunun için bir oturum açtığından birkaç "
+        "saniye daha sürer.",
     "whisper.cpp reaches the card through CUDA, ROCm or Vulkan when the build "
     "it is running was made with one. A build without any of them runs on the "
     "processor whatever this says.":

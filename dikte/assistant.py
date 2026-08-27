@@ -487,6 +487,32 @@ def _agy_label(step):
     return t("Using {name}…", name=name or "a tool")
 
 
+def agy_models():
+    """The models Antigravity itself would offer right now, in its own order.
+
+    `agy models` prints one `id<TAB>display name` line per model, so the list
+    is as current as the account behind the CLI. Unlike Codex it asks Google
+    rather than a cache on disk, a couple of seconds the caller spends off the
+    interface thread. A machine without agy, or a call that fails, answers
+    with nothing and the caller keeps its built-in list.
+    """
+    if not shutil.which("agy"):
+        return []
+    try:
+        proc = subprocess.run(["agy", "models"],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    ids = []
+    for line in (proc.stdout or "").splitlines():
+        model_id, tab, _ = line.partition("\t")
+        if tab and model_id.strip():
+            ids.append(model_id.strip())
+    return ids
+
+
 # --- OpenRouter -----------------------------------------------------------
 
 def _ask_openrouter(prompt, conf, on_stage):

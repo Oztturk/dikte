@@ -28,6 +28,11 @@ from dikte import settings_ui
 from dikte import update
 from tests.support import DikteTest, only_these_tools
 
+# The harness below replaces this method on the class so that opening a window
+# in a test never calls anybody; taken here, before any test runs, so the two
+# tests about what it does when called still have the real one.
+REAL_LOAD_HOSTED_MODELS = settings_ui.SettingsWindow._load_hosted_models
+
 # One application for the whole run; Qt allows no second one.
 _app = QApplication.instance() or QApplication([])
 
@@ -139,6 +144,10 @@ class Settings(DikteTest):
                                             "_load_transcribe_models"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_codex_models"))
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_agy_models"))
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_hosted_models"))
         # The local model boxes fetch their own list the moment they are shown,
         # from a thread, which is nobody's test failing but a real request.
         self.enterContext(mock.patch.object(settings_ui.LocalModelBox,
@@ -287,6 +296,53 @@ class Settings(DikteTest):
                 self.assertEqual(offered[1:], ["gpt-6", "gpt-6-mini"])
         self.assertEqual(window.cleanup_codex_model.currentText(),
                          "my-own-model")
+
+    def test_agy_answering_refills_both_of_its_boxes(self):
+        """The same arrangement as Codex: both boxes, nothing chosen is lost."""
+        conf = self.config(cleanup_agy_model="my-own-model")
+        window = self.window(conf)
+        window._on_agy_models_loaded(["gemini-4-flash-low", "gemini-4-pro-low"])
+        for combo in (window.cleanup_agy_model, window.assistant_agy_model):
+            with self.subTest(combo=combo.objectName() or "combo"):
+                offered = [combo.itemText(i) for i in range(combo.count())]
+                self.assertEqual(offered[1:],
+                                 ["gemini-4-flash-low", "gemini-4-pro-low"])
+        self.assertEqual(window.cleanup_agy_model.currentText(), "my-own-model")
+
+    def test_openrouter_s_list_arriving_at_open_refills_cleanup_and_meetings(self):
+        conf = self.config(cleanup_model="my/own-model")
+        window = self.window(conf)
+        window._on_hosted_models_loaded("openrouter", ["a/one", "b/two"])
+        for combo in (window.cleanup_model, window.meeting_model):
+            with self.subTest(combo=combo.objectName() or "combo"):
+                offered = [combo.itemText(i) for i in range(combo.count())]
+                self.assertEqual(offered, ["a/one", "b/two"])
+        self.assertEqual(window.cleanup_model.currentText(), "my/own-model")
+
+    def test_google_s_list_arriving_at_open_refills_its_own_box_only(self):
+        window = self.window(self.config(cleanup_gemini_model="gemini-x"))
+        before = window.cleanup_model.count()
+        window._on_hosted_models_loaded("gemini", ["gemini-4-flash"])
+        offered = [window.cleanup_gemini_model.itemText(i)
+                   for i in range(window.cleanup_gemini_model.count())]
+        self.assertEqual(offered, ["gemini-4-flash"])
+        self.assertEqual(window.cleanup_gemini_model.currentText(), "gemini-x")
+        self.assertEqual(window.cleanup_model.count(), before)
+
+    def test_no_key_no_call_home_at_open(self):
+        """Opening Settings is not consent to be talked about to two vendors."""
+        window = self.window(self.config())
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(settings_ui.threading, "Thread") as thread:
+            REAL_LOAD_HOSTED_MODELS(window)
+        thread.assert_not_called()
+
+    def test_a_key_on_file_is_fetched_with_at_open(self):
+        window = self.window(self.config(openrouter_api_key="sk-or-x",
+                                         gemini_api_key="AIza-x"))
+        with mock.patch.object(settings_ui.threading, "Thread") as thread:
+            REAL_LOAD_HOSTED_MODELS(window)
+        self.assertEqual(thread.call_count, 2)
 
     def test_the_update_line_names_the_version_that_is_running(self):
         window = self.window(cfg.Config())
@@ -1005,7 +1061,11 @@ class MeetingSources(DikteTest):
                 mock.patch.object(settings_ui.SettingsWindow,
                                   "_load_transcribe_models"), \
                 mock.patch.object(settings_ui.SettingsWindow,
-                                  "_load_codex_models"):
+                                  "_load_codex_models"), \
+                mock.patch.object(settings_ui.SettingsWindow,
+                                  "_load_agy_models"), \
+                mock.patch.object(settings_ui.SettingsWindow,
+                                  "_load_hosted_models"):
             window = settings_ui.SettingsWindow(cfg.Config())
         self.addCleanup(window.deleteLater)
         self.addCleanup(window.close)
@@ -1037,6 +1097,10 @@ class LocalModels(DikteTest):
         # And one with Codex on it would ask it for its model list.
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_codex_models"))
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_agy_models"))
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_hosted_models"))
 
     def window(self, conf):
         window = settings_ui.SettingsWindow(conf)

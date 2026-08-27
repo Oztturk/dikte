@@ -846,5 +846,45 @@ class CodexModels(DikteTest):
             self.assertEqual(assistant.codex_models(), [])
 
 
+class AgyModels(DikteTest):
+    """The model list read off `agy models`: one id, a tab, a display name."""
+
+    LISTING = ("gemini-4-flash-high\tGemini 4 Flash (High)\n"
+               "gemini-4-flash-low\tGemini 4 Flash (Low)\n"
+               "a line with no tab is not a model\n"
+               "\ta tab with no id in front of it is not one either\n")
+
+    def models(self, reply, code=0):
+        with only_these_tools("agy"), \
+                mock.patch.object(subprocess, "run",
+                                  return_value=FakeCompleted(
+                                      returncode=code, stdout=reply)) as run:
+            found = assistant.agy_models()
+        self.run_call = run
+        return found
+
+    def test_the_listing_arrives_in_agy_s_own_order(self):
+        found = self.models(self.LISTING)
+        self.assertEqual(found, ["gemini-4-flash-high", "gemini-4-flash-low"])
+        self.assertEqual(self.run_call.call_args.args[0], ["agy", "models"])
+
+    def test_an_agy_that_is_not_installed_is_not_run(self):
+        with only_these_tools(), \
+                mock.patch.object(subprocess, "run") as run:
+            self.assertEqual(assistant.agy_models(), [])
+        run.assert_not_called()
+
+    def test_a_call_that_failed_answers_with_nothing(self):
+        self.assertEqual(self.models("error: not logged in", code=1), [])
+        self.assertEqual(self.models(""), [])
+
+    def test_an_agy_that_hangs_is_given_up_on(self):
+        with only_these_tools("agy"), \
+                mock.patch.object(subprocess, "run",
+                                  side_effect=subprocess.TimeoutExpired(
+                                      ["agy"], 30)):
+            self.assertEqual(assistant.agy_models(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

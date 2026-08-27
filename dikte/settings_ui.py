@@ -31,7 +31,6 @@ from . import meeting
 from . import paste
 from . import update
 from .filetranscribe import FileTranscriber
-from . import i18n
 from .i18n import t
 
 UI_LANGUAGES = [("Automatic (system)", "auto"), ("Turkish", "tr"), ("English", "en")]
@@ -575,6 +574,9 @@ class SettingsWindow(QDialog):
     _gemini_models_loaded = pyqtSignal(list, str)
     _transcribe_models_loaded = pyqtSignal(list, str)
     _codex_models_loaded = pyqtSignal(list)
+    _agy_models_loaded = pyqtSignal(list)
+    # Which hosted provider's list arrived on its own at open, and the list.
+    _hosted_models_loaded = pyqtSignal(str, list)
     # Which key was tested, whether it worked, and what to write under it.
     _test_done = pyqtSignal(str, bool, str)
     # The release that was found, or None, and what went wrong instead.
@@ -635,6 +637,8 @@ class SettingsWindow(QDialog):
         self._gemini_models_loaded.connect(self._on_gemini_models_loaded)
         self._transcribe_models_loaded.connect(self._on_transcribe_models_loaded)
         self._codex_models_loaded.connect(self._on_codex_models_loaded)
+        self._agy_models_loaded.connect(self._on_agy_models_loaded)
+        self._hosted_models_loaded.connect(self._on_hosted_models_loaded)
         self._test_done.connect(self._on_test_done)
         self._update_checked.connect(self._on_update_checked)
         self.transcriber.progress.connect(self._on_file_progress)
@@ -646,6 +650,8 @@ class SettingsWindow(QDialog):
             self.meetings.failed.connect(self._on_minutes_failed)
         self._load()
         self._load_codex_models()
+        self._load_agy_models()
+        self._load_hosted_models()
         # Connected after the load, so that filling the boxes in is not taken
         # for the user ticking them.
         self.file_timestamps.toggled.connect(self._remember_file_choices)
@@ -2094,6 +2100,72 @@ class SettingsWindow(QDialog):
             combo.addItem(t("Codex's own default"), "")
             for name in models:
                 combo.addItem(name, name)
+            combo.setCurrentText(current)
+
+    def _load_agy_models(self):
+        """Ask Antigravity which models it offers, off the interface thread.
+
+        The same arrangement as Codex, except agy answers over the network
+        rather than from a cache, so the couple of seconds it takes are spent
+        where nobody is waiting. Skipped when agy is not installed, which is
+        also when the built-in list stays on screen and nobody is running
+        Antigravity anyway.
+        """
+        if not shutil.which("agy"):
+            return
+
+        def work():
+            found = assistant.agy_models()
+            if found:
+                self._agy_models_loaded.emit(found)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_agy_models_loaded(self, models):
+        for combo in (self.cleanup_agy_model, self.assistant_agy_model):
+            current = combo.currentText()
+            combo.clear()
+            combo.addItem(t("Antigravity's own default"), "")
+            for name in models:
+                combo.addItem(name, name)
+            combo.setCurrentText(current)
+
+    def _load_hosted_models(self):
+        """Fetch OpenRouter's and Google's lists at open, without being asked.
+
+        The Fetch buttons stay: they are the retry, and the place a failure is
+        worth explaining. Here nobody asked, so an error changes nothing on
+        screen and the built-in lists remain, and a provider whose key has not
+        been given yet is not called at all.
+        """
+        jobs = []
+        openrouter_key = self.conf.openrouter_key()
+        if openrouter_key:
+            jobs.append(("openrouter",
+                         lambda: api.openrouter_models(openrouter_key)))
+        gemini_key = self.conf.gemini_key()
+        gemini_base = self.conf["gemini_base_url"]
+        if gemini_key:
+            jobs.append(("gemini",
+                         lambda: api.gemini_models(gemini_key, gemini_base)))
+        for provider, fetch in jobs:
+            def work(provider=provider, fetch=fetch):
+                try:
+                    found = fetch()
+                except api.ApiError:
+                    return
+                if found:
+                    self._hosted_models_loaded.emit(provider, found)
+
+            threading.Thread(target=work, daemon=True).start()
+
+    def _on_hosted_models_loaded(self, provider, models):
+        combos = ((self.cleanup_model, self.meeting_model)
+                  if provider == "openrouter" else (self.cleanup_gemini_model,))
+        for combo in combos:
+            current = combo.currentText()
+            combo.clear()
+            combo.addItems(models)
             combo.setCurrentText(current)
 
     def _test_openai(self):

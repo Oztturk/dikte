@@ -56,6 +56,18 @@ analysis = Analysis(                            # noqa: F821
     noarchive=False,
 )
 
+# Qt's xcb platform plugin uses libxkbcommon in two halves: the core library
+# and libxkbcommon-x11, which allocates keymap objects and hands them to the
+# core half to use and free, so the two must come from the same build. The
+# build machine has only the core half installed, which had PyInstaller
+# bundling that one while the other kept coming from the user's system, and a
+# 22.04-era core freeing what a current x11 half allocated is the startup
+# crash of issue #57. Ship neither: any desktop that can show a window
+# carries both, from one build.
+if not (MACOS or WINDOWS):
+    analysis.binaries = [entry for entry in analysis.binaries
+                         if "libxkbcommon" not in entry[0]]
+
 archive = PYZ(analysis.pure)                    # noqa: F821
 
 executable = EXE(                               # noqa: F821

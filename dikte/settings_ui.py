@@ -569,6 +569,7 @@ class SettingsWindow(QDialog):
     _models_loaded = pyqtSignal(list, str, str)
     _transcribe_models_loaded = pyqtSignal(list, str)
     _codex_models_loaded = pyqtSignal(list)
+    _opencode_models_loaded = pyqtSignal(list)
     # Which key was tested, whether it worked, and what to write under it.
     _test_done = pyqtSignal(str, bool, str)
     # The release that was found, or None, and what went wrong instead.
@@ -628,6 +629,7 @@ class SettingsWindow(QDialog):
         self._models_loaded.connect(self._on_models_loaded)
         self._transcribe_models_loaded.connect(self._on_transcribe_models_loaded)
         self._codex_models_loaded.connect(self._on_codex_models_loaded)
+        self._opencode_models_loaded.connect(self._on_opencode_models_loaded)
         self._test_done.connect(self._on_test_done)
         self._update_checked.connect(self._on_update_checked)
         self.transcriber.progress.connect(self._on_file_progress)
@@ -639,6 +641,7 @@ class SettingsWindow(QDialog):
             self.meetings.failed.connect(self._on_minutes_failed)
         self._load()
         self._load_codex_models()
+        self._load_opencode_models()
         # Connected after the load, so that filling the boxes in is not taken
         # for the user ticking them.
         self.file_timestamps.toggled.connect(self._remember_file_choices)
@@ -2078,6 +2081,37 @@ class SettingsWindow(QDialog):
             combo.addItem(t("Codex's own default"), "")
             for name in models:
                 combo.addItem(name, name)
+            combo.setCurrentText(current)
+
+    def _load_opencode_models(self):
+        """Ask OpenCode Go for its catalog of the day, off the interface thread.
+
+        The same courtesy Codex gets: the built-in list is only a starting
+        point, so the boxes are refreshed from the source as the window opens.
+        Skipped without a key, so a machine that never touched OpenCode Go
+        sends it nothing; the Fetch button stays for a key typed in just now.
+        """
+        key = self.conf.opencode_key()
+        if not key:
+            return
+
+        def work():
+            try:
+                found = api.openai_models(key, self.conf["opencode_base_url"],
+                                          "OpenCode Go")
+            except api.ApiError:
+                # The window is only opening; the Test button says what failed.
+                return
+            if found:
+                self._opencode_models_loaded.emit(found)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_opencode_models_loaded(self, models):
+        for combo in (self.cleanup_opencode_model, self.assistant_opencode_model):
+            current = combo.currentText()
+            combo.clear()
+            combo.addItems(models)
             combo.setCurrentText(current)
 
     def _test_openai(self):

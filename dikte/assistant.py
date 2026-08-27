@@ -1,22 +1,28 @@
 """Handing a dictation to an agent as a command, and pasting back its answer.
 
-Three of them, because not everyone has the same one installed:
+Four of them, because not everyone has the same one installed:
 
   Claude Code   `claude -p`, the session you would have opened yourself
   Codex         `codex exec`, the same idea from the other shop
+  Antigravity   `agy -p`, Google's, with a browser of its own attached
   OpenRouter    a plain chat request, over the key that is already configured
 
-The first two are the whole machine: they run commands, read files, and reach
+The first three are the whole machine: they run commands, read files, and reach
 whatever skills and services you have connected, which is what makes "put that
 in my calendar on Thursday" a thing you can say. OpenRouter cannot touch any of
-that, and is there so that a question still gets an answer on a machine with
-neither CLI installed.
+that, and is there so that a question still gets an answer on a machine with no
+CLI installed at all.
+
+What each of the three is allowed to do without asking is settled where that
+program keeps its own permissions, not here. Dikte hands Claude Code the mode
+chosen in Settings because it has a flag for one; Codex gets a sandbox for the
+same reason; Antigravity has neither, and reads its own allow-rules instead.
 
 Whichever it is, the reply is pasted exactly where the transcript would have
 been, and the conversation carries across dictations so that "and move that to
 Friday" knows what "that" is.
 
-The two CLIs are read as they stream rather than waited out. A command that
+The three CLIs are read as they stream rather than waited out. A command that
 reaches for the calendar or the web takes long enough that a still indicator is
 indistinguishable from a hang, so every tool they pick up is named in the corner
 while they work.
@@ -38,7 +44,12 @@ from . import paths
 from .i18n import t
 
 SESSION_FILE = cfg.DATA_DIR / "assistant.json"
-PROVIDERS = ("claude", "codex", "openrouter")
+PROVIDERS = ("claude", "codex", "agy", "openrouter")
+
+# What each one is called where a person reads it: the tray, the corner of
+# the screen, and the line an error is written in.
+SERVICES = {"claude": "Claude", "codex": "Codex", "agy": "Antigravity",
+            "openrouter": "OpenRouter"}
 
 # How many messages of an OpenRouter conversation are carried forward. The two
 # CLIs keep their own history and need no such number; here every turn is resent
@@ -70,6 +81,29 @@ CODEX_ITEMS = {
     "patch_apply": "Editing a file…",
     "todo_list": "Planning…",
 }
+# Antigravity carries a browser around with it, so the handful of names below
+# stand in for the couple of dozen browser_* tools it can pick up; being told
+# which mouse button moved is not what the corner of the screen is for.
+AGY_TOOLS = {
+    "run_command": "Running a command…",
+    "command_status": "Running a command…",
+    "send_command_input": "Running a command…",
+    "view_file": "Reading…",
+    "read_url_content": "Reading a web page…",
+    "list_dir": "Looking through files…",
+    "find_by_name": "Looking through files…",
+    "grep_search": "Searching the files…",
+    "search_web": "Searching the web…",
+    "replace_file_content": "Editing a file…",
+    "multi_replace_file_content": "Editing a file…",
+    "sed_file": "Editing a file…",
+    "notebook_edit": "Editing a file…",
+    "write_to_file": "Writing a file…",
+    "generate_image": "Drawing…",
+    "manage_task": "Planning…",
+    "invoke_subagent": "Handing it to a subagent…",
+    "browser_subagent": "Handing it to a subagent…",
+}
 
 
 # How hard to think, in each provider's own vocabulary. The setting is one
@@ -85,6 +119,12 @@ CLAUDE_EFFORT = {"none": "low", "minimal": "low", "low": "low",
 CODEX_EFFORT = {"none": "low", "minimal": "low", "low": "low",
                 "medium": "medium", "high": "high", "xhigh": "high",
                 "max": "high"}
+# agy has three rungs and no word for off, so the bottom of the ladder lands on
+# "low" and the top two on "high". Shared with cleanup, which runs the same
+# program for the smaller job.
+AGY_EFFORT = {"none": "low", "minimal": "low", "low": "low",
+              "medium": "medium", "high": "high", "xhigh": "high",
+              "max": "high"}
 
 
 class AssistantError(Exception):
@@ -102,12 +142,28 @@ def provider(conf):
 
 def executable(name):
     """The CLI a provider runs, or "" when it needs none."""
-    return {"claude": "claude", "codex": "codex"}.get(name, "")
+    return {"claude": "claude", "codex": "codex", "agy": "agy"}.get(name, "")
+
+
+def model(conf):
+    """Which model answered, for the history to record.
+
+    Each provider keeps its own setting, and the one a CLI is left on has no id
+    to report, only a name — the same arrangement cleanup.model() makes.
+    """
+    name = provider(conf)
+    if name == "codex":
+        return conf["assistant_codex_model"].strip() or "codex"
+    if name == "agy":
+        return conf["assistant_agy_model"].strip() or "agy"
+    if name == "openrouter":
+        return conf["assistant_openrouter_model"]
+    return conf["assistant_model"]
 
 
 def display_name(conf):
     """What to call the thing being asked, in the tray and in the corner."""
-    return {"claude": "Claude", "codex": "Codex"}.get(provider(conf), "OpenRouter")
+    return SERVICES.get(provider(conf), "OpenRouter")
 
 
 # --- the conversation -----------------------------------------------------
@@ -207,7 +263,7 @@ def ask(prompt, conf, on_stage=None, should_stop=None):
             "Settings → Agent.", binary=binary,
         ))
 
-    run = _ask_claude if name == "claude" else _ask_codex
+    run = {"claude": _ask_claude, "codex": _ask_codex, "agy": _ask_agy}[name]
     session = read_session(name, conf["assistant_session_minutes"] * 60)
     try:
         return run(prompt, conf, session, on_stage, should_stop)
@@ -259,7 +315,7 @@ def _ask_claude(prompt, conf, session, on_stage, should_stop):
             found["warning"] = _denial_warning(event)
 
     code, stderr = _stream(cmd, conf, on_event, should_stop)
-    return _conclude(found, code, stderr, session, "Claude")
+    return _conclude(found, code, stderr, session, "claude")
 
 
 def _claude_label(block):
@@ -327,7 +383,7 @@ def _ask_codex(prompt, conf, session, on_stage, should_stop):
                                 else str(error)) or t("Codex ended with an error.")
 
     code, stderr = _stream(cmd, conf, on_event, should_stop)
-    return _conclude(found, code, stderr, session, "Codex")
+    return _conclude(found, code, stderr, session, "codex")
 
 
 def _codex_label(item):
@@ -364,6 +420,97 @@ def codex_models():
             and row.get("visibility") != "hide"]
     rows.sort(key=lambda row: row.get("priority") or 0)
     return [row["slug"] for row in rows]
+
+
+# --- Antigravity ----------------------------------------------------------
+
+def _ask_agy(prompt, conf, session, on_stage, should_stop):
+    # Antigravity takes no system prompt of its own either, so the instruction
+    # rides in front of the command, kept apart from it so the two are not read
+    # as one.
+    body = f"{conf.assistant_prompt()}\n\n---\n\n{prompt}"
+    cmd = [
+        "agy", "-p", body,
+        "--output-format", "stream-json",
+        # agy stops after five minutes unless it is told otherwise, which is
+        # shorter than the timeout this setting offers.
+        "--print-timeout", f"{conf['assistant_timeout']}s",
+    ]
+    # One or the other, always: left with neither, agy picks up whichever
+    # project it was last in and works in that project's directory rather than
+    # the one _stream is about to start it in.
+    cmd += ["--conversation", session] if session else ["--new-project"]
+    if conf["assistant_agy_model"].strip():
+        cmd += ["--model", conf["assistant_agy_model"].strip()]
+    effort = AGY_EFFORT.get(conf["assistant_reasoning"], "")
+    if effort:
+        # Most of agy's own model ids carry the effort in their suffix already;
+        # this is for the ones that do not.
+        cmd += ["--effort", effort]
+
+    found = {"answer": "", "warning": "", "session": "", "failure": ""}
+
+    def on_event(event):
+        kind = event.get("event")
+        if kind == "init":
+            found["session"] = event.get("conversation_id") or found["session"]
+        elif kind == "step_update":
+            step = event.get("step_update") or {}
+            # A tool is reported twice, once when it starts and once when it is
+            # done; the corner wants the first of those.
+            if (on_stage and step.get("step_type") == "tool"
+                    and step.get("state") == "ACTIVE"):
+                on_stage(_agy_label(step))
+        elif kind == "result":
+            result = event.get("result") or {}
+            found["session"] = result.get("conversation_id") or found["session"]
+            answer = (result.get("response") or "").strip()
+            if result.get("status") == "SUCCESS":
+                found["answer"] = answer
+            else:
+                found["failure"] = answer or t("{service} ended with an error.",
+                                               service="Antigravity")
+
+    code, stderr = _stream(cmd, conf, on_event, should_stop)
+    return _conclude(found, code, stderr, session, "agy")
+
+
+def _agy_label(step):
+    name = step.get("tool_name", "")
+    if name in AGY_TOOLS:
+        return t(AGY_TOOLS[name])
+    if name.startswith("browser_") or name.startswith("capture_browser"):
+        return t("Working in the browser…")
+    if name == "call_mcp_tool":
+        server = (step.get("tool_info") or {}).get("parameters") or {}
+        return t("Using {name}…", name=server.get("server") or "a tool")
+    return t("Using {name}…", name=name or "a tool")
+
+
+def agy_models():
+    """The models Antigravity itself would offer right now, in its own order.
+
+    `agy models` prints one `id<TAB>display name` line per model, so the list
+    is as current as the account behind the CLI. Unlike Codex it asks Google
+    rather than a cache on disk, a couple of seconds the caller spends off the
+    interface thread. A machine without agy, or a call that fails, answers
+    with nothing and the caller keeps its built-in list.
+    """
+    if not shutil.which("agy"):
+        return []
+    try:
+        proc = subprocess.run(["agy", "models"],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    ids = []
+    for line in (proc.stdout or "").splitlines():
+        model_id, tab, _ = line.partition("\t")
+        if tab and model_id.strip():
+            ids.append(model_id.strip())
+    return ids
 
 
 # --- OpenRouter -----------------------------------------------------------
@@ -469,8 +616,9 @@ _API_TROUBLE = re.compile(
     r"\b(401|403|429|5\d\d)\b")
 
 
-def _conclude(found, code, stderr, session, service):
+def _conclude(found, code, stderr, session, name):
     """Turn what the stream said into an answer, or into the reason there is none."""
+    service = SERVICES.get(name, name)
     if code != 0 and not found["answer"]:
         # A resumed run that died with nothing to show is treated as the
         # session being gone, whatever the wording: this code used to look for
@@ -489,7 +637,7 @@ def _conclude(found, code, stderr, session, service):
     if not found["answer"]:
         raise AssistantError(t("{service} answered with nothing.", service=service))
     if found["session"]:
-        write_session("claude" if service == "Claude" else "codex", found["session"])
+        write_session(name, found["session"])
     return found["answer"], found["warning"]
 
 

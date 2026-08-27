@@ -387,6 +387,10 @@ DEFAULTS = {
     "groq_base_url": "https://api.groq.com/openai/v1",
     "openrouter_api_key": "",
     "openrouter_base_url": "https://openrouter.ai/api/v1",
+    "gemini_api_key": "",
+    # Google's OpenAI-compatible endpoint. Cleanup only: there is no
+    # /audio/transcriptions behind it, so it is not one of the TRANSCRIBERS.
+    "gemini_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
     "transcribe_provider": "local",  # "local", or a key of TRANSCRIBERS
     "transcribe_model": "gpt-4o-transcribe",           # used when provider is openai
     "groq_transcribe_model": "whisper-large-v3-turbo",
@@ -412,6 +416,8 @@ DEFAULTS = {
     "cleanup_model": "google/gemini-3.5-flash-lite",
     "cleanup_claude_model": "haiku",   # Claude Code: an alias, or a full model id
     "cleanup_codex_model": "",         # empty -> whatever Codex is set to
+    "cleanup_gemini_model": "gemini-3.5-flash-lite",
+    "cleanup_agy_model": "",           # empty -> whatever Antigravity is set to
     "cleanup_reasoning": "",        # empty -> whatever the model does by default
 
     # --- llama.cpp, on this machine -----------------------------------------
@@ -485,12 +491,13 @@ DEFAULTS = {
 
     # --- speaking a command to an agent -------------------------------------
     "assistant_shortcut": "",       # empty -> tray only
-    "assistant_provider": "claude",  # claude | codex | openrouter
+    "assistant_provider": "claude",  # claude | codex | agy | openrouter
     "assistant_model": "sonnet",    # Claude Code: an alias, or a full model id
     "assistant_permission_mode": "auto",
     "assistant_codex_model": "",    # empty -> whatever Codex is set to
     "assistant_codex_sandbox": "workspace-write",
     "assistant_openrouter_model": "google/gemini-3.5-flash",
+    "assistant_agy_model": "",      # empty -> whatever Antigravity is set to
     "assistant_reasoning": "",      # empty -> the model's own default
     "assistant_dir": "",            # empty -> the home directory
     "assistant_prompt": "",         # empty -> language-specific default
@@ -632,6 +639,9 @@ class Config:
 
     def openrouter_key(self):
         return self.api_key("openrouter_api_key")
+
+    def gemini_key(self):
+        return self.api_key("gemini_api_key")
 
     def transcribe_target(self):
         """Key, endpoint and model for whichever provider does speech to text.

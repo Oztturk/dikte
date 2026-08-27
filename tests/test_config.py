@@ -187,6 +187,8 @@ class Keys(DikteTest):
     def test_every_provider_falls_back_to_the_variable_of_its_own_name(self):
         with mock.patch.dict(os.environ, {"GROQ_API_KEY": "gsk-env"}):
             self.assertEqual(cfg.Config().groq_key(), "gsk-env")
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "AIza-env"}):
+            self.assertEqual(cfg.Config().gemini_key(), "AIza-env")
 
 
 class TranscribeTarget(DikteTest):
@@ -574,6 +576,12 @@ class Defaults(unittest.TestCase):
     def test_the_keys_ship_empty(self):
         self.assertEqual(cfg.DEFAULTS["openai_api_key"], "")
         self.assertEqual(cfg.DEFAULTS["openrouter_api_key"], "")
+        self.assertEqual(cfg.DEFAULTS["gemini_api_key"], "")
+
+    def test_google_ai_studio_is_a_cleanup_provider_and_not_a_transcriber(self):
+        """Its compatible endpoint has no /audio/transcriptions behind it."""
+        self.assertNotIn("gemini", cfg.TRANSCRIBERS)
+        self.assertIn("gemini", cleanup.PROVIDERS)
 
     def test_every_language_specific_prompt_has_both_languages(self):
         for name in ("CLEANUP_PROMPT", "FILE_CLEANUP_PROMPT", "MEETING_PROMPT",

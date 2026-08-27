@@ -112,10 +112,13 @@ Sesi yazıya çevirme ve temizleme, ayarlar penceresinde ayrı ayrı sağlayıc�
 seçer; ikisi de varsayılan olarak burada, kendi modellerinle çalışır. Bulutu
 seçersen sesi yazıya çevirme **OpenAI**, **Groq** ya da **OpenRouter**'da
 (varsayılan `gpt-4o-transcribe`), temizleme OpenRouter'da
-(`google/gemini-3.5-flash-lite`) ya da kuruluysa Claude Code veya Codex'te
-çalışır. Anahtarları boş bırakırsan `OPENAI_API_KEY`, `GROQ_API_KEY` ve
-`OPENROUTER_API_KEY` kullanılır; anahtarlar `~/.config/dikte/config.json`
-içinde, izinler 600, Mac'te ise `~/Library/Application Support/Dikte` altında.
+(`google/gemini-3.5-flash-lite`), **Google AI Studio**'da
+(`gemini-3.5-flash-lite`) ya da kuruluysa Claude Code, Codex veya
+Antigravity'de çalışır. İlk ikisi tek bir HTTP isteği; üç CLI ise bunun için
+birer oturum açar, fazladan giden birkaç saniye de oradan gelir. Anahtarları boş
+bırakırsan `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` ve
+`GEMINI_API_KEY` kullanılır; anahtarlar `~/.config/dikte/config.json` içinde,
+izinler 600, Mac'te ise `~/Library/Application Support/Dikte` altında.
 Temizlemeyi tamamen kapatabilirsin, o zaman ham transkript yapıştırılır; modelin
 yanındaki kutudan düşünme seviyesini de seçebilirsin.
 
@@ -184,8 +187,10 @@ olmasını ister.
   yapıştırır: cevabı ya da ne yapıldığını söyleyen bir cümle. Kendi açacağın
   oturumun aynısıdır, yani skill'lerin ve bağlı servislerin oradadır; "bunu
   perşembe üçe takvime koy" cümlesini Claude olmayan bir pencerede söyleyebilir
-  olmanı sağlayan da budur. Codex (`codex exec`) da aynı şekilde çalışır;
-  OpenRouter ise ikisi de kurulu olmayan bir makinede düz soru cevap için
+  olmanı sağlayan da budur. Codex (`codex exec`) ile Antigravity (`agy -p`) da
+  aynı şekilde çalışır; ama Antigravity'ye Dikte bir izin kipi ya da sandbox
+  veremiyor, sormadan ne yapabileceğini kendi allow-rule'ları belirliyor.
+  OpenRouter ise hiçbiri kurulu olmayan bir makinede düz soru cevap için
   duruyor. Sağlayıcı, model, izinler ve çalışma dizini Ayarlar → Ajan
   sekmesinde; arka arkaya verilen komutlar tek bir konuşmada kalır.
 - **Toplantılar** mikrofonla hoparlör çıkışından aynı anda kaydedilir; kimin ne
@@ -233,9 +238,9 @@ cli.py            komut satırı: bütün fiiller ve verdikleri cevap
 ipc.py            yerel sokette bir istek, bir cevap
 audio.py          PCM kaydı: diktede pw-record, toplantıda ffmpeg
 meeting.py        kanal ayırma, konuşmacı etiketi, temizleme, tutanak
-assistant.py      dikteyi Claude Code, Codex ya da OpenRouter'dan geçirme
+assistant.py      dikteyi Claude Code, Codex, agy ya da OpenRouter'dan geçirme
 api.py            transkript ve temizleme istekleri (yalnız stdlib)
-cleanup.py        transkripti kim temizler: OpenRouter, burası, Claude ya da Codex
+cleanup.py        transkripti kim temizler: bulutta bir model, burası, bir CLI
 ggml.py           whisper.cpp ve llama.cpp'yi indirip burada çalıştırma
 hub.py            GitHub ve Hugging Face'te bugün ne olduğu
 update.py         yeni sürüm çıkmış mı, çıkmışsa hangi sayfada

@@ -339,6 +339,33 @@ def _codex_label(item):
     return t("Using {name}…", name=item_type or "a tool")
 
 
+def codex_models():
+    """The models Codex itself would offer right now, best first.
+
+    `codex debug models` prints the catalog the CLI's own model picker reads,
+    fetched from OpenAI and cached beside Codex's config, so the list is as
+    current as the installed Codex and there is no second list to keep up to
+    date here. Entries the picker hides are internal and stay hidden. A machine
+    without Codex, or one too old to have the command, answers with nothing and
+    the caller keeps its built-in list.
+    """
+    if not shutil.which("codex"):
+        return []
+    try:
+        proc = subprocess.run(["codex", "debug", "models"],
+                              capture_output=True, text=True, timeout=30)
+        catalog = json.loads(proc.stdout or "null")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    if not isinstance(catalog, dict):
+        return []
+    rows = [row for row in catalog.get("models") or []
+            if isinstance(row, dict) and row.get("slug")
+            and row.get("visibility") != "hide"]
+    rows.sort(key=lambda row: row.get("priority") or 0)
+    return [row["slug"] for row in rows]
+
+
 # --- OpenRouter -----------------------------------------------------------
 
 def _ask_openrouter(prompt, conf, on_stage):

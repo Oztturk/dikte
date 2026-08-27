@@ -554,6 +554,10 @@ TR = {
         "“sonnet” gibi bir ad her zaman o serinin en yenisini seçer. Opus daha "
         "çok düşünür ve daha geç cevaplar; bu da en çok burada hissedilir, "
         "çünkü ekranın başında bekliyorsun.",
+    "The list is a starting point, not a fence: any model name {name} accepts "
+    "can be typed straight in.":
+        "Liste başlangıç için, sınır değil: {name} hangi model adını kabul "
+        "ediyorsa buraya elle yazılabilir.",
     "Permissions": "İzinler",
     "Decide on its own, with the safety checks on":
         "Kendi karar versin, güvenlik denetimleri açık",

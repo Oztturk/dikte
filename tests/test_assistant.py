@@ -17,7 +17,8 @@ import unittest
 from unittest import mock
 
 from dikte import assistant
-from tests.support import DikteTest, fake_urlopen, only_these_tools
+from tests.support import (DikteTest, FakeCompleted, fake_urlopen,
+                           only_these_tools)
 
 
 class FakeCli:
@@ -662,6 +663,51 @@ class Ask(DikteTest):
             answer, _ = assistant.ask("hi", conf)
         self.assertEqual(answer, "done")
         self.assertEqual(len(calls), 1)
+
+
+class CodexModels(DikteTest):
+    """The model list read off `codex debug models`."""
+
+    CATALOG = {"models": [
+        {"slug": "gpt-6-mini", "visibility": "list", "priority": 9},
+        {"slug": "gpt-6", "visibility": "list", "priority": 1},
+        {"slug": "codex-auto-review", "visibility": "hide", "priority": 3},
+    ]}
+
+    def models(self, reply, code=0):
+        with only_these_tools("codex"), \
+                mock.patch.object(subprocess, "run",
+                                  return_value=FakeCompleted(
+                                      returncode=code, stdout=reply)) as run:
+            found = assistant.codex_models()
+        self.run_call = run
+        return found
+
+    def test_the_catalog_arrives_best_first_without_the_hidden_ones(self):
+        found = self.models(json.dumps(self.CATALOG))
+        self.assertEqual(found, ["gpt-6", "gpt-6-mini"])
+        self.assertEqual(self.run_call.call_args.args[0],
+                         ["codex", "debug", "models"])
+
+    def test_a_codex_that_is_not_installed_is_not_run(self):
+        with only_these_tools(), \
+                mock.patch.object(subprocess, "run") as run:
+            self.assertEqual(assistant.codex_models(), [])
+        run.assert_not_called()
+
+    def test_a_codex_too_old_to_have_the_command(self):
+        self.assertEqual(self.models("error: unknown subcommand", code=2), [])
+
+    def test_a_catalog_that_is_not_what_was_expected(self):
+        self.assertEqual(self.models(json.dumps(["gpt-6"])), [])
+        self.assertEqual(self.models(""), [])
+
+    def test_a_codex_that_hangs_is_given_up_on(self):
+        with only_these_tools("codex"), \
+                mock.patch.object(subprocess, "run",
+                                  side_effect=subprocess.TimeoutExpired(
+                                      ["codex"], 30)):
+            self.assertEqual(assistant.codex_models(), [])
 
 
 if __name__ == "__main__":

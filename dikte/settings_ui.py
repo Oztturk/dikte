@@ -906,7 +906,14 @@ class SettingsWindow(QDialog):
         self.cleanup_opencode_model = QComboBox()
         self.cleanup_opencode_model.setEditable(True)
         self.cleanup_opencode_model.addItems(OPENCODE_MODELS)
-        orr_form.addRow(t("Model"), self.cleanup_opencode_model)
+        self.cleanup_opencode_model.setToolTip(_typed_model_note("OpenCode Go"))
+        # Its own button, because a widget lives in one row and the OpenRouter
+        # button is hidden along with its box whenever OpenCode Go is chosen.
+        self.refresh_opencode_models = QPushButton(t("Fetch model list"))
+        self.refresh_opencode_models.clicked.connect(self._load_models)
+        self.cleanup_opencode_model_row = self._row(self.cleanup_opencode_model,
+                                                    self.refresh_opencode_models)
+        orr_form.addRow(t("Model"), self.cleanup_opencode_model_row)
 
         self.cleanup_reasoning = QComboBox()
         for label, value in REASONING_LEVELS:
@@ -1996,6 +2003,7 @@ class SettingsWindow(QDialog):
 
     def _load_models(self):
         self.refresh_models.setEnabled(False)
+        self.refresh_opencode_models.setEnabled(False)
         self.models_label.setText(t("Fetching model list…"))
         # Whichever provider is selected for cleanup is the one whose models are
         # fetched, so the list lands in the box of the provider on screen.
@@ -2025,6 +2033,7 @@ class SettingsWindow(QDialog):
 
     def _on_models_loaded(self, models, error, provider):
         self.refresh_models.setEnabled(True)
+        self.refresh_opencode_models.setEnabled(True)
         if error:
             self.models_label.setText(t("Could not fetch the list: {error}", error=error))
             return
@@ -2334,7 +2343,7 @@ class SettingsWindow(QDialog):
                                         provider == "claude")
         self.cleanup_form.setRowVisible(self.cleanup_codex_model,
                                         provider == "codex")
-        self.cleanup_form.setRowVisible(self.cleanup_opencode_model,
+        self.cleanup_form.setRowVisible(self.cleanup_opencode_model_row,
                                         provider == "opencode")
         self.cleanup_form.setRowVisible(self.cleanup_reasoning,
                                         provider != "local")

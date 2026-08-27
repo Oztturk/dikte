@@ -261,7 +261,7 @@ class Settings(DikteTest):
         """An OpenRouter id and a Claude alias are not the same field."""
         window = self.window(cfg.Config())
         boxes = {"openrouter": window.cleanup_model_row,
-                 "opencode": window.cleanup_opencode_model,
+                 "opencode": window.cleanup_opencode_model_row,
                  "claude": window.cleanup_claude_model,
                  "codex": window.cleanup_codex_model}
         for provider, box in boxes.items():
@@ -284,6 +284,30 @@ class Settings(DikteTest):
                 self.assertEqual(offered[1:], ["gpt-6", "gpt-6-mini"])
         self.assertEqual(window.cleanup_codex_model.currentText(),
                          "my-own-model")
+
+    def test_a_fetched_opencode_list_lands_in_opencode_s_own_box(self):
+        """The OpenRouter and meeting boxes are not refilled by another
+        provider's catalog, and the picked model survives the refill."""
+        conf = self.config(cleanup_opencode_model="my-own-model",
+                           meeting_model="some/meeting-model")
+        window = self.window(conf)
+        before = [window.meeting_model.itemText(i)
+                  for i in range(window.meeting_model.count())]
+        window._on_models_loaded(["glm-5.3", "kimi-k3"], "", "opencode")
+        combo = window.cleanup_opencode_model
+        offered = [combo.itemText(i) for i in range(combo.count())]
+        self.assertEqual(offered, ["glm-5.3", "kimi-k3"])
+        self.assertEqual(combo.currentText(), "my-own-model")
+        self.assertEqual([window.meeting_model.itemText(i)
+                          for i in range(window.meeting_model.count())], before)
+
+    def test_opencode_cleanup_still_offers_the_fetch_button(self):
+        """The OpenRouter button leaves the screen with its box, so OpenCode Go
+        carries its own."""
+        window = self.window(cfg.Config())
+        window._select_data(window.cleanup_provider, "opencode")
+        self.assertFalse(window.cleanup_opencode_model_row.isHidden())
+        self.assertTrue(window.cleanup_model_row.isHidden())
 
     def test_the_update_line_names_the_version_that_is_running(self):
         window = self.window(cfg.Config())

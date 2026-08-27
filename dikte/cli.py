@@ -136,21 +136,10 @@ def _ask_instance(opts, cmd, wait=False, **args):
 
 def launch_gui(verb=""):
     """No instance running, so become the application itself."""
-    args = ipc.launcher()
-    if verb:
-        args.append(verb)
-    args.append("--gui")
-    if sys.platform == "win32":
-        # execv on Windows mangles arguments with spaces and would leave the
-        # application tied to this console; start it detached instead.
-        subprocess.Popen(
-            args,
-            creationflags=(subprocess.DETACHED_PROCESS
-                           | subprocess.CREATE_NEW_PROCESS_GROUP),
-            close_fds=True,
-        )
-        sys.exit(0)
-    os.execv(args[0], args)
+    ipc.respawn(([verb] if verb else []) + ["--gui"])
+    # respawn only returns on Windows, where the application was started
+    # detached and this console process's job is over.
+    sys.exit(0)
 
 
 def _not_running(opts):
@@ -521,7 +510,8 @@ def cmd_history_clear(opts):
 
 # --- settings ---------------------------------------------------------------
 
-SECRET_KEYS = ("openai_api_key", "openrouter_api_key", "gemini_api_key")
+SECRET_KEYS = ("openai_api_key", "groq_api_key", "openrouter_api_key",
+               "gemini_api_key")
 
 
 def _mask(key, value):
@@ -879,7 +869,10 @@ def cmd_doctor(opts):
     programs = {name: shutil.which(name) or "" for name in wanted if name}
     target = conf.transcribe_target()
     cleaner = cleanup.provider(conf)
-    cleanup_binary = cleanup.executable(cleaner)
+    # What each provider actually needs: the local ones have no key to check,
+    # and marking them by the key they do not use reported every fully local
+    # setup as broken.
+    transcribe_ready = conf.transcribe_ready()
     # Only the two that answer over HTTP have a key worth looking at. A CLI has
     # a program to find instead, and the model on this machine has neither, so
     # "no key" there has to read as beside the point rather than as one that has
@@ -888,29 +881,47 @@ def cmd_doctor(opts):
         "openrouter": ("OpenRouter", conf.openrouter_key()),
         "gemini": ("Google AI Studio", conf.gemini_key()),
     }.get(cleaner, ("", ""))
+    if cleanup_service:
+        cleanup_ready = bool(cleanup_key)
+    elif cleaner == "local":
+        cleanup_ready = conf.local_llm_ready()
+    else:
+        cleanup_ready = bool(programs.get(cleanup.executable(cleaner), ""))
     checks = {
         "programs": programs,
         "transcription": {"provider": target.provider, "model": target.model,
-                          "key": bool(target.api_key)},
+                          "key": bool(target.api_key),
+                          "ready": transcribe_ready},
         "cleanup": {"enabled": conf["cleanup_enabled"], "provider": cleaner,
                     "model": cleanup.model(conf),
-                    "key": bool(cleanup_key) if cleanup_service else None},
+                    "key": bool(cleanup_key) if cleanup_service else None,
+                    "ready": cleanup_ready},
         "agent": {"provider": assistant.provider(conf),
                   "directory": assistant.working_dir(conf)},
         "running": ipc.send("status") is not None,
     }
+    if target.provider == "local":
+        transcribe_line = (f"{'✓' if transcribe_ready else '✗'} {target.service}, "
+                           f"transcribing on {target.model or 'no model yet'}")
+    else:
+        transcribe_line = (f"{'✓' if transcribe_ready else '✗'} {target.service} "
+                           f"key, transcribing on {target.model}")
+    if cleanup_service:
+        cleanup_line = (f"{'✓' if cleanup_ready else '✗'} {cleanup_service} key, "
+                        f"cleaning up on {cleanup.model(conf)}")
+    elif cleaner == "local":
+        cleanup_line = (f"{'✓' if cleanup_ready else '✗'} Local model, "
+                        f"cleaning up on {conf['local_llm_model'] or 'no model yet'}")
+    else:
+        # Cleanup on a CLI needs no key, so what is checked is the program.
+        cleanup_line = (f"{'✓' if cleanup_ready else '✗'} "
+                        f"{cleanup.executable(cleaner)}, cleaning up on "
+                        f"{cleanup.model(conf)}")
     lines = [f"{'✓' if path else '✗'} {name:14} {path or 'not on your PATH'}"
              for name, path in programs.items()]
     lines += [
-        f"{'✓' if target.api_key else '✗'} {target.service} key, transcribing on "
-        f"{target.model}",
-        # Cleanup on a CLI needs no key, so what is checked is the program;
-        # cleanup on this machine has neither, and the model is the whole answer.
-        (f"{'✓' if cleanup_key else '✗'} {cleanup_service} key, cleaning up on "
-         f"{cleanup.model(conf)}") if cleanup_service else
-        (f"{'✓' if programs[cleanup_binary] else '✗'} {cleanup_binary}, "
-         f"cleaning up on {cleanup.model(conf)}") if cleanup_binary else
-        f"· cleaning up here, on {cleanup.model(conf)}",
+        transcribe_line,
+        cleanup_line,
         f"{'✓' if checks['running'] else '·'} application "
         + ("running" if checks["running"] else "not running"),
     ]
@@ -1033,13 +1044,14 @@ def build_parser():
     transcribe.set_defaults(func=cmd_transcribe)
 
     # --- meetings ---------------------------------------------------------
-    for name, help_text in (("meeting", "start a meeting, or end it and write it up"),
-                            ("meeting-cancel", "")):
-        page = leaf(subs, name, help_text)
-        page.add_argument("--wait", action="store_true",
-                          help="wait for the minutes to be written")
-        page.add_argument("--timeout", type=float, default=0)
-        page.set_defaults(func=cmd_meeting)
+    page = leaf(subs, "meeting", "start a meeting, or end it and write it up")
+    page.add_argument("--wait", action="store_true",
+                      help="wait for the minutes to be written")
+    page.add_argument("--timeout", type=float, default=0)
+    page.set_defaults(func=cmd_meeting)
+    # No --wait here: a cancel is answered on the spot, and a flag the server
+    # would ignore is a promise the help text cannot keep.
+    leaf(subs, "meeting-cancel", "").set_defaults(func=cmd_meeting)
 
     meetings = leaf(subs, "meetings", "recorded meetings and their minutes")
     inner = meetings.add_subparsers(dest="meetings", metavar="")
@@ -1058,12 +1070,14 @@ def build_parser():
     delete.add_argument("which", nargs="+")
     delete.set_defaults(func=cmd_meetings_delete)
     for name, verb, help_text in (("start", "meeting-start", "start recording one"),
-                                  ("stop", "meeting-stop", "end it and write it up"),
-                                  ("cancel", "meeting-cancel", "throw the recording away")):
+                                  ("stop", "meeting-stop", "end it and write it up")):
         page = leaf(inner, name, help_text)
         page.add_argument("--wait", action="store_true")
         page.add_argument("--timeout", type=float, default=0)
         page.set_defaults(func=cmd_meeting, verb=verb)
+    # cancel takes no --wait: see the top-level meeting-cancel.
+    leaf(inner, "cancel", "throw the recording away").set_defaults(
+        func=cmd_meeting, verb="meeting-cancel")
 
     # --- history ----------------------------------------------------------
     history = leaf(subs, "history", "past dictations")
@@ -1174,6 +1188,16 @@ def _needs_subcommand(parser):
 
 def run(argv):
     global _app
+    # A redirected stdout on Windows falls back to the console codepage,
+    # strict, and a transcript (or doctor's ✓) with a character outside it
+    # would then fail the run after the work succeeded. Interactively nothing
+    # changes: the console is written through its own Unicode API.
+    if sys.platform == "win32" and not os.environ.get("PYTHONIOENCODING"):
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(errors="replace")
+            except (AttributeError, OSError):
+                pass
     parser = build_parser()
     opts = parser.parse_args(argv)
     # No verb at all is the plain `dikte`, which means the settings window.

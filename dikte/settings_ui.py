@@ -870,8 +870,8 @@ class SettingsWindow(QDialog):
         for label, value in CLEANUP_PROVIDERS:
             self.cleanup_provider.addItem(t(label), value)
         self.cleanup_provider.setToolTip(t(
-            "OpenRouter and OpenCode Go are the quickest and need nothing "
-            "installed. llama.cpp runs here, on a model downloaded below. Claude "
+            "OpenRouter is the quickest; OpenCode Go needs nothing installed "
+            "either. llama.cpp runs here, on a model downloaded below. Claude "
             "Code and Codex clean up on the subscription you already have, "
             "without a second key, and take a few seconds longer because each "
             "one opens a session to do it."

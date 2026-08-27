@@ -810,16 +810,15 @@ TR = {
         "Düşünmeye eğitilmiş bir model, aksi söylenmedikçe düşünür; bir virgül "
         "için 300 token akıl yürütmek 300 token'lık bekleyiştir. Temizleme için "
         "doğrusu Kapalı.",
-    "OpenRouter and OpenCode Go are the quickest and need nothing "
-    "installed. llama.cpp runs here, on a model downloaded below. Claude "
+    "OpenRouter is the quickest; OpenCode Go needs nothing installed "
+    "either. llama.cpp runs here, on a model downloaded below. Claude "
     "Code and Codex clean up on the subscription you already have, "
     "without a second key, and take a few seconds longer because each "
     "one opens a session to do it.":
-        "En hızlıları OpenRouter ve OpenCode Go'dur; kurulu bir program "
-        "istemezler. llama.cpp burada, aşağıda indirilen bir modelle çalışır. "
-        "Claude Code ve Codex, ikinci bir anahtar olmadan zaten sahip olduğun "
-        "abonelikle temizler; her biri bunun için bir oturum açtığından birkaç "
-        "saniye daha sürer.",
+        "En hızlısı OpenRouter'dır; OpenCode Go da kurulum istemez. llama.cpp "
+        "burada, aşağıda indirilen bir modelle çalışır. Claude Code ve Codex, "
+        "ikinci bir anahtar olmadan zaten sahip olduğun abonelikle temizler; "
+        "her biri bunun için bir oturum açtığından birkaç saniye daha sürer.",
     "whisper.cpp reaches the card through CUDA, ROCm or Vulkan when the build "
     "it is running was made with one. A build without any of them runs on the "
     "processor whatever this says.":

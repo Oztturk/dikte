@@ -23,6 +23,7 @@ from . import filetranscribe
 from . import ggml
 from . import hotkey
 from . import hub
+from . import i18n
 from . import ipc
 from . import meeting
 from . import paste
@@ -515,6 +516,10 @@ class LocalModelBox(QGroupBox):
 
 class SettingsWindow(QDialog):
     applied = pyqtSignal()
+    # A save changed the interface language. Every label below is translated
+    # as the window is built, so the change cannot reach this window: the
+    # owner replaces it with a fresh one instead.
+    language_changed = pyqtSignal()
     # A newer release this window's own check found, so that the tray icon
     # hears about it from here rather than waiting for its own next check.
     update_found = pyqtSignal(object)
@@ -541,6 +546,8 @@ class SettingsWindow(QDialog):
         self._key_fields = {}
         self._testers = {}
         self._shown_provider = ""
+        # What _save compares against to know a rebuild is due.
+        self._built_language = i18n.language()
         # Where "Open the release page" goes: the release itself once a check
         # has named one, and the page that redirects to the newest until then.
         self._release_url = update.RELEASES_PAGE
@@ -639,9 +646,6 @@ class SettingsWindow(QDialog):
         self.ui_language = QComboBox()
         for label, code in UI_LANGUAGES:
             self.ui_language.addItem(t(label), code)
-        self.ui_language.setToolTip(
-            t("Restart Dikte for the language change to reach every window.")
-        )
         form.addRow(t("Interface language"), self.ui_language)
 
         self.mic = QComboBox()
@@ -1794,7 +1798,27 @@ class SettingsWindow(QDialog):
             print(f"dikte: could not trim the history ({exc})")
         self._load_history()  # the trim may just have dropped rows from the list
         self.applied.emit()
+        # conf.save() has switched the language t() speaks, so the message box
+        # already answers in the new one; the labels around it were translated
+        # when the window was built and stay behind. Asking for the rebuild
+        # waits until the box is dismissed, so the window is not pulled out
+        # from under a dialog it is holding up.
         QMessageBox.information(self, t("Dikte Settings"), t("Saved successfully."))
+        if i18n.language() != self._built_language and not self._work_in_flight():
+            self.language_changed.emit()
+
+    def _work_in_flight(self):
+        """A daemon thread of this window's is still running.
+
+        Replacing the window now would let it be collected, taking the C++
+        side of the model boxes down with it, and the thread's next progress
+        report would land on a deleted object. The stale labels stand until a
+        later save finds the window quiet; _built_language keeps the old
+        language, so that save asks for the rebuild by itself.
+        """
+        return (self.transcriber.busy
+                or self.local_whisper._downloading
+                or self.local_llm._downloading)
 
     @staticmethod
     def _select_data(combo, value):

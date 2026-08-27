@@ -240,6 +240,21 @@ class Settings(DikteTest):
             with self.subTest(key=key):
                 self.assertEqual(stored[key], value)
 
+    def test_only_a_save_that_changed_the_language_says_so(self):
+        # The owner answers language_changed by replacing the window, so a
+        # save that left the language alone must keep quiet.
+        i18n = settings_ui.i18n
+        self.addCleanup(i18n.set_language, i18n.language())
+        window = self.window(cfg.Config())
+        heard = []
+        window.language_changed.connect(lambda: heard.append(True))
+        window._save()
+        self.assertEqual(heard, [])
+        other = "en" if i18n.language() == "tr" else "tr"
+        window._select_data(window.ui_language, other)
+        window._save()
+        self.assertEqual(heard, [True])
+
     def test_the_model_box_on_screen_belongs_to_whoever_cleans_up(self):
         """An OpenRouter id and a Claude alias are not the same field."""
         window = self.window(cfg.Config())

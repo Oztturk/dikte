@@ -151,6 +151,11 @@ class Dikte:
         # Which recording is the current one, so a timer set for the run that
         # started it cannot stop the one that came after.
         self._run_id = 0
+        # Dictations handed to the pipeline and not yet out of it. More than
+        # one is normal: the microphone is free while a transcript is being
+        # cleaned up, so the next dictation can already be spoken, and it then
+        # queues up behind the one still going.
+        self._transcripts_pending = 0
         # The application that was in front when the recording started, which
         # is where the transcript is meant to go, and the timer watching for
         # the moment it has to be put back there. macOS only; see
@@ -183,9 +188,9 @@ class Dikte:
         self.recorder.stopped.connect(self._on_recorded)
         self.recorder.died.connect(self._on_recorder_died)
         self.recorder.failed.connect(self._on_recorder_error)
-        self.pipeline.stage.connect(self.overlay.show_busy)
+        self.pipeline.stage.connect(self._on_stage)
         self.pipeline.finished.connect(self._on_finished)
-        self.pipeline.failed.connect(self._on_error)
+        self.pipeline.failed.connect(self._on_pipeline_failed)
         self.ask_pipeline.stage.connect(self.ask_overlay.show_busy)
         self.ask_pipeline.finished.connect(self._on_ask_finished)
         self.ask_pipeline.failed.connect(self._on_ask_error)
@@ -355,13 +360,18 @@ class Dikte:
             BUSY: ("Working…", "view-refresh", "Dikte: working"),
         }
         label, icon, tip = labels[self.state]
+        if self.state == BUSY:
+            # Still working, but the microphone is free again: the menu offers
+            # the next dictation rather than a wait.
+            label = "Start recording"
         agent = assistant.display_name(self.conf)
 
         self.toggle_action.setText(t(label))
-        # Free while the other one is thinking, blocked only while it is holding
-        # the microphone.
+        # Blocked only while something is holding the microphone: a transcript
+        # still being cleaned up queues the next dictation behind it, and the
+        # agent thinking never blocked it at all.
         self.toggle_action.setEnabled(
-            self.state == RECORDING or (self.state == IDLE and not self.recording)
+            self.state == RECORDING or not self.recording
         )
         asked = i18n.name(agent, "dative")
         self.ask_action.setText(
@@ -612,9 +622,11 @@ class Dikte:
             return
         if self.state == RECORDING:
             self.stop()
-        elif self.state == IDLE:
+        else:
+            # BUSY does not block: the microphone is free while the last
+            # dictation is being cleaned up, and the next one starts now and
+            # waits its turn in the pipeline.
             self.start()
-        # a request during its own BUSY is ignored; nothing queues up
 
     def _toggle_ask(self):
         if self._repeated("ask"):
@@ -646,7 +658,10 @@ class Dikte:
         return mac_window.frontmost_pid() if sys.platform == "darwin" else None
 
     def start(self):
-        if self.state != IDLE or self.recording:
+        # Only a held microphone blocks: a previous dictation still being
+        # transcribed or cleaned up is the pipeline's business, not the
+        # recorder's.
+        if self.state == RECORDING or self.recording:
             return
         self.front_before = self._the_front()
         self.overlay.show_recording()
@@ -758,7 +773,9 @@ class Dikte:
         self.ticker.stop()
         self._clear_pause()
         self._set_state(BUSY)
-        self.overlay.show_busy(t("Transcribing…"))
+        self.overlay.show_busy(t("Waiting for the one before it…")
+                               if self._transcripts_pending
+                               else t("Transcribing…"))
         self.recorder.stop()
 
     def stop_ask(self):
@@ -823,7 +840,9 @@ class Dikte:
             self._settle(ASK, dropped)
         else:
             self.overlay.dismiss()
-            self._set_state(IDLE)
+            # An earlier dictation may still be in the pipeline; only the
+            # recording was thrown away.
+            self._set_state(BUSY if self._transcripts_pending else IDLE)
             self._settle(DICTATION, dropped)
 
     def cancel_ask(self):
@@ -1014,28 +1033,51 @@ class Dikte:
             self.ask_pipeline.run(wav_path, duration, rms_values, ask=True,
                                   paste=wants_paste, focus=focus)
         else:
+            self._transcripts_pending += 1
             self.pipeline.run(wav_path, duration, rms_values,
                               paste=wants_paste, focus=focus)
+
+    def _on_stage(self, message):
+        # The corner belongs to the recording when one is on: the previous
+        # run's progress must not wipe the waveform mid-sentence.
+        if self.state != RECORDING:
+            self.overlay.show_busy(message)
+
+    def _transcript_settled(self, payload):
+        """One run out of the pipeline; where dictation stands now.
+
+        A request that asked to wait is answered once the queue is empty: with
+        runs finishing in the order they were spoken, the one it stopped is the
+        last of them, and an earlier run's result would be the wrong answer.
+        """
+        self._transcripts_pending -= 1
+        if self.state != RECORDING:
+            self._set_state(BUSY if self._transcripts_pending else IDLE)
+        if not self._transcripts_pending:
+            self._settle(DICTATION, payload)
 
     def _on_finished(self, _raw, text, warning):
         if warning:
             # The text was still pasted, but cleanup did not run. Say so loudly:
             # a rejected key otherwise looks exactly like working dictation.
-            self.overlay.show_warning(
-                t("Pasted raw, cleanup failed: {error}", error=warning.splitlines()[0])
-            )
+            if self.state != RECORDING:
+                self.overlay.show_warning(
+                    t("Pasted raw, cleanup failed: {error}",
+                      error=warning.splitlines()[0])
+                )
             self.tray.showMessage(
                 t("Dikte: cleanup failed"), warning,
                 QSystemTrayIcon.MessageIcon.Warning, 10000,
             )
-        else:
+        elif self.state != RECORDING:
+            # While a new recording is on, the flash is skipped: the text
+            # arriving where the cursor is says everything it would have.
             action = t("Pasted") if self.conf["auto_paste"] else t("Copied")
             self.overlay.show_done(
                 t("{action}: {preview}", action=action, preview=_preview(text))
             )
-        self._set_state(IDLE)
-        self._settle(DICTATION, {"ok": True, "text": text, "raw": _raw,
-                                 "warning": warning})
+        self._transcript_settled({"ok": True, "text": text, "raw": _raw,
+                                  "warning": warning})
 
     def _on_ask_finished(self, _raw, text, warning):
         agent = assistant.display_name(self.conf)
@@ -1072,6 +1114,17 @@ class Dikte:
         self.ticker.stop()
         (self._on_ask_error if owner == ASK else self._on_error)(message)
 
+    def _on_pipeline_failed(self, message):
+        """A run the pipeline gave up on; whatever queued behind it still runs."""
+        if self.state == RECORDING:
+            # The corner belongs to the new recording; the failure still has to
+            # be seen somewhere.
+            self.tray.showMessage("Dikte", message,
+                                  QSystemTrayIcon.MessageIcon.Warning, 8000)
+        else:
+            self._report(message, self.overlay)
+        self._transcript_settled({"ok": False, "error": message})
+
     def _on_recorder_died(self):
         """The capture quit under a live recording: keep what it caught.
 
@@ -1091,8 +1144,9 @@ class Dikte:
             self.stop()
 
     def _on_error(self, message):
+        """The recorder or the key listener failed; no run reached the pipeline."""
         self._report(message, self.overlay)
-        self._set_state(IDLE)
+        self._set_state(BUSY if self._transcripts_pending else IDLE)
         self._settle(DICTATION, {"ok": False, "error": message})
 
     def _on_ask_error(self, message):

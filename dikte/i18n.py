@@ -69,6 +69,7 @@ TR = {
 
     # --- overlay / pipeline -------------------------------------------
     "Transcribing…": "Yazıya çevriliyor…",
+    "Waiting for the one before it…": "Öncekinin bitmesi bekleniyor…",
     "Cleaning up…": "Temizleniyor…",
     "Pasting…": "Yapıştırılıyor…",
     "Pasted": "Yapıştırıldı",

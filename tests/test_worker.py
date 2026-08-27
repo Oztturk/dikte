@@ -8,6 +8,7 @@ afterwards. A pull request that reorders any of it shows up here.
 import contextlib
 import io
 import os
+import threading
 import unittest
 from unittest import mock
 
@@ -338,13 +339,41 @@ class Chain(DikteTest):
 
 
 class Busy(DikteTest):
-    def test_a_second_run_while_one_is_going_is_ignored(self):
+    def test_a_second_run_while_one_is_going_waits_its_turn(self):
+        """The microphone is free while a transcript is being cleaned up, so
+        the next dictation can already have been spoken by then. It has to run
+        once the first is done, in the order they were spoken, on one thread."""
         pipeline = worker.Pipeline(self.config())
-        pipeline._thread = mock.Mock(is_alive=lambda: True)
-        self.assertTrue(pipeline.busy)
-        with mock.patch.object(worker.threading, "Thread") as thread:
-            pipeline.run("/tmp/nope.wav", 1.0)
-        thread.assert_not_called()
+        order = []
+        started, gate = threading.Event(), threading.Event()
+
+        def work(wav_path, *_rest):
+            order.append(wav_path)
+            started.set()
+            if wav_path == "first.wav":
+                gate.wait(5)
+
+        with mock.patch.object(pipeline, "_work", side_effect=work):
+            pipeline.run("first.wav", 1.0)
+            self.assertTrue(started.wait(5))
+            pipeline.run("second.wav", 1.0)
+            # Held, not dropped and not running beside the first.
+            self.assertEqual(order, ["first.wav"])
+            gate.set()
+            pipeline._thread.join(5)
+        self.assertEqual(order, ["first.wav", "second.wav"])
+
+    def test_a_run_arriving_after_the_queue_drained(self):
+        """The worker thread ends with the queue; the next run brings one."""
+        pipeline = worker.Pipeline(self.config())
+        order = []
+        with mock.patch.object(pipeline, "_work",
+                               side_effect=lambda wav, *rest: order.append(wav)):
+            pipeline.run("first.wav", 1.0)
+            pipeline._thread.join(5)
+            pipeline.run("second.wav", 1.0)
+            pipeline._thread.join(5)
+        self.assertEqual(order, ["first.wav", "second.wav"])
 
     def test_the_chunk_length_matches_the_level_meter(self):
         """The silence thresholds are read in seconds, so the two must agree."""

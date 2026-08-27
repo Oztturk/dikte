@@ -6,6 +6,7 @@ whatever came of it: an answer to a question, or a sentence saying what was
 done.
 """
 
+import collections
 import os
 import shutil
 import sys
@@ -45,6 +46,13 @@ class Pipeline(QObject):
         self.conf = conf
         self._thread = None
         self._stop = threading.Event()
+        # Recordings waiting their turn, and whether a thread is working them
+        # off. The flag rather than the thread's own liveness, because a thread
+        # stays alive for a moment after deciding it is done, and a job arriving
+        # in that moment would be left in the queue with nobody coming back.
+        self._jobs = collections.deque()
+        self._draining = False
+        self._jobs_lock = threading.Lock()
 
     @property
     def busy(self):
@@ -57,16 +65,30 @@ class Pipeline(QObject):
         socket, and pasting it into whatever had focus is nobody's intention.
 
         `focus` is the application that was in front when the recording began,
-        as a process id, and is where the paste is meant to land."""
-        if self.busy:
-            return
+        as a process id, and is where the paste is meant to land.
+
+        A run started while one is going waits its turn rather than being
+        dropped: the next dictation can be spoken while the last one is still
+        being cleaned up, and each one is finished, pasted and reported in the
+        order it was spoken."""
+        with self._jobs_lock:
+            self._jobs.append((wav_path, duration, list(rms_values), ask, paste,
+                               focus))
+            if self._draining:
+                return
+            self._draining = True
         self._stop.clear()
-        self._thread = threading.Thread(
-            target=self._work,
-            args=(wav_path, duration, list(rms_values), ask, paste, focus),
-            daemon=True,
-        )
+        self._thread = threading.Thread(target=self._drain, daemon=True)
         self._thread.start()
+
+    def _drain(self):
+        while True:
+            with self._jobs_lock:
+                if not self._jobs:
+                    self._draining = False
+                    return
+                job = self._jobs.popleft()
+            self._work(*job)
 
     def cancel(self):
         """Give up on a job already under way.

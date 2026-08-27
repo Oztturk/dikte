@@ -94,13 +94,12 @@ ASSISTANT_OR_MODELS = [
     "google/gemini-3.5-flash", "anthropic/claude-sonnet-5", "openai/gpt-5.4",
     "x-ai/grok-4.5", "google/gemini-3.1-pro-preview",
 ]
-# The models OpenCode Go serves over /chat/completions. The ones its catalog
-# lists under /responses or /messages (Grok, GPT-5.6 Luna, MiniMax, Qwen) are
-# not offered here, because Dikte speaks only the chat endpoint.
+# A starting set of the models OpenCode Go serves over /chat/completions; the
+# Fetch button asks the endpoint itself for the full catalog of the day.
 OPENCODE_MODELS = [
     "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.2", "glm-5.1",
     "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "longcat-2.0",
-    "mimo-v2.5", "mimo-v2.5-pro", "hy3", "ox-alpha-free",
+    "mimo-v2.5", "mimo-v2.5-pro", "hy3",
 ]
 # What Claude Code may do without being able to ask. It cannot ask: there is no
 # window to answer in, so a mode that would have prompted denies instead.

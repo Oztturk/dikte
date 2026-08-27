@@ -25,6 +25,7 @@ from unittest import mock
 from dikte import assistant
 from dikte import config as cfg
 from dikte import i18n
+from dikte import update
 
 # What the application is, rather than what it does: PipeWire, wl-clipboard,
 # ydotool, KDE's shortcut file, /dev/input. A port to another desktop replaces
@@ -38,6 +39,18 @@ from dikte import i18n
 linux_only = unittest.skipUnless(
     sys.platform.startswith("linux"),
     "covers the Linux desktop stack (PipeWire, wl-clipboard, ydotool, KDE)",
+)
+
+# The launchers a downloaded build writes for itself. There are two downloads,
+# an AppImage and a disk image, so `integrate` has a Linux half and a macOS half
+# and no third one, and the tests that pin them stand in a home laid out the way
+# those two systems lay one out: paths that start at the root, a $HOME the
+# library reads, a symlink for the command. None of that is a Windows machine,
+# where the same code never runs. A Windows build would add an entry there and
+# take the mark off these.
+posix_only = unittest.skipIf(
+    sys.platform == "win32",
+    "covers what an AppImage and a .app write into the desktop they landed on",
 )
 
 
@@ -74,8 +87,10 @@ class DikteTest(unittest.TestCase):
             MEETINGS_FILE=data_dir / "meetings.jsonl",
         )
         # Resolved from cfg.DATA_DIR when assistant was imported, so it needs
-        # moving on its own.
+        # moving on its own. The same goes for where the update check writes
+        # down when it last ran.
         self.patch_attr(assistant, "SESSION_FILE", data_dir / "assistant.json")
+        self.patch_attr(update, "STATE_FILE", data_dir / "update.json")
 
         i18n.set_language("en")
         self.addCleanup(i18n.set_language, "en")

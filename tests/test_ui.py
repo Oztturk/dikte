@@ -16,12 +16,16 @@ from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from dikte import audio
 from dikte import cleanup
 from dikte import config as cfg
+from dikte import ggml
 from dikte import hotkey
+from dikte import ipc
 from dikte import overlay as overlay_module
 from dikte import paste
 from dikte import settings_ui
+from dikte import update
 from tests.support import DikteTest, only_these_tools
 
 # One application for the whole run; Qt allows no second one.
@@ -100,6 +104,7 @@ CHANGED = {
     "pause_shortcut": "Meta+P",
     "evdev_hotkey": True,
     "history_limit": 50,
+    "update_check": False,
 }
 
 
@@ -249,6 +254,31 @@ class Settings(DikteTest):
                 self.assertEqual(shown, [provider])
                 self.assertFalse(box.isHidden())
 
+    def test_the_update_line_names_the_version_that_is_running(self):
+        window = self.window(cfg.Config())
+        self.assertIn(settings_ui.__version__, window.update_status.text())
+        # Nothing to open until a check has found something to open.
+        self.assertTrue(window.update_page.isHidden())
+
+    def test_a_newer_release_puts_the_page_button_on_screen(self):
+        window = self.window(cfg.Config())
+        told = []
+        window.update_found.connect(told.append)
+        release = update.Release("9.9.9", "https://example.invalid/9.9.9", "")
+        window._on_update_checked(release, "")
+        self.assertIn("9.9.9", window.update_status.text())
+        self.assertFalse(window.update_page.isHidden())
+        self.assertEqual(window._release_url, release.url)
+        # And the tray hears about it from here rather than waiting a day.
+        self.assertEqual(told, [release])
+
+    def test_a_check_that_failed_says_why_and_hands_the_button_back(self):
+        window = self.window(cfg.Config())
+        window.update_now.setEnabled(False)
+        window._on_update_checked(None, "api.github.com answered HTTP 403.")
+        self.assertIn("403", window.update_status.text())
+        self.assertTrue(window.update_now.isEnabled())
+
     def test_the_settings_the_window_does_not_show_are_left_alone(self):
         """A tab nobody wrote must not reset what the command line set."""
         self.write_config({"silence_db": -42.0, "speech_margin_db": 15.0,
@@ -281,7 +311,7 @@ class Settings(DikteTest):
         text = self.shortcut_tab_text(window)
         self.assertIn("i3 keeps no shortcut registry", text)
         self.assertNotIn("KWin", text)
-        self.assertIn("__main__.py toggle", text)
+        self.assertIn(ipc.command_for("toggle"), text)
         # Not a choice to offer where it is the only mechanism there is.
         self.assertTrue(window.evdev_enabled.isHidden())
         self.assertFalse([button for button in
@@ -458,7 +488,7 @@ class MacSettings(Settings):
         text = self.shortcut_tab_text(window)
         self.assertIn("Dikte asks macOS for these combinations", text)
         self.assertNotIn("KWin", text)
-        self.assertNotIn("__main__.py toggle", text)
+        self.assertNotIn(ipc.command_for("toggle"), text)
 
     def test_the_paste_keys_on_offer_are_the_ones_a_mac_uses(self):
         window = self.window(cfg.Config())
@@ -482,11 +512,326 @@ class KdeSettings(Settings):
         self.assertIn("KWin only reads shortcut settings at startup", text)
         self.assertIn("Install as a KDE shortcut", text)
         self.assertNotIn("keeps no shortcut registry", text)
-        self.assertNotIn("__main__.py toggle", text)
+        self.assertNotIn(ipc.command_for("toggle"), text)
         # Here it is a choice: the wait for the next login, or the key press
         # reaching the focused application as well.
         self.assertFalse(window.evdev_enabled.isHidden())
 
+
+
+
+class FakeAppKit:
+    """The Objective-C runtime, answering rather than being asked.
+
+    Stands in for what mac_window._appkit() loads, so what the indicator's
+    window would have been sent can be read off `told` on any machine. The
+    selectors come back as the names they were registered under, which is what
+    lets the tests below name the message they mean.
+    """
+
+    def __init__(self, window=4242, panel=True, mask=0xe):
+        self.objc = self
+        self.window, self.panel, self.mask = window, panel, mask
+        self.told = {}
+
+    def objc_getClass(self, name):
+        return 1 if name == b"NSPanel" else 0
+
+    def selector(self, name):
+        return name.decode()
+
+    def shared(self, _class_name, _selector):
+        return 1
+
+    def ask(self, _to, selector):
+        return self.window if selector == "window" else 0
+
+    def ask_unsigned(self, _to, _selector):
+        return self.mask
+
+    def ask_of_class(self, _to, _selector, _klass):
+        return self.panel
+
+    def tell_bool(self, _to, selector, value):
+        self.told[selector] = value
+
+    tell_unsigned = tell_bool
+
+
+class MacIndicatorWindow(DikteTest):
+    """Which of the three AppKit settings the indicator's window is sent.
+
+    The nonactivating bit is the one worth a test of its own: it is legal on an
+    NSPanel and nowhere else, and sending it to a plain NSWindow raises an
+    Objective-C exception, which through ctypes is not something Python can
+    catch. It takes the whole process down. `_is_panel` is the only thing
+    standing between the two, so what it answers has to decide what is sent.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from dikte import mac_window
+        self.mac_window = mac_window
+        self.patch_attr(mac_window.QGuiApplication, "platformName",
+                        staticmethod(lambda: "cocoa"))
+
+    def told(self, **kwargs):
+        """What keep_on_screen sends an indicator, against this AppKit."""
+        appkit = FakeAppKit(**kwargs)
+        self.patch_attr(self.mac_window, "_appkit", lambda: appkit)
+        widget = overlay_module.Overlay()
+        self.addCleanup(widget.deleteLater)
+        self.addCleanup(widget.close)
+        self.answered = self.mac_window.keep_on_screen(widget)
+        return appkit.told
+
+    def test_a_window_that_is_not_a_panel_is_never_sent_the_style_mask(self):
+        """The message that would kill the process. The other two still go."""
+        told = self.told(panel=False)
+        self.assertTrue(self.answered)
+        self.assertNotIn("setStyleMask:", told)
+        self.assertIs(told["setHidesOnDeactivate:"], False)
+        self.assertEqual(told["setCollectionBehavior:"],
+                         self.mac_window.BEHAVIOUR)
+
+    def test_a_panel_without_the_bit_is_sent_the_mask_with_it_added(self):
+        told = self.told(panel=True, mask=0xe)
+        self.assertEqual(told["setStyleMask:"],
+                         0xe | self.mac_window.NONACTIVATING_PANEL)
+
+    def test_a_panel_that_already_has_the_bit_is_left_alone(self):
+        """Every dictation runs this again, and a mask Cocoa did not need is a
+        window it rebuilds underneath the indicator."""
+        told = self.told(panel=True,
+                         mask=0xe | self.mac_window.NONACTIVATING_PANEL)
+        self.assertNotIn("setStyleMask:", told)
+
+    def test_a_window_the_view_does_not_have_yet_is_not_messaged(self):
+        self.assertEqual(self.told(window=0), {})
+        self.assertFalse(self.answered)
+
+    def test_nothing_is_sent_anywhere_but_cocoa(self):
+        """Every other platform hands out a winId that means something else
+        entirely, and messaging it crashes the run."""
+        self.patch_attr(self.mac_window.QGuiApplication, "platformName",
+                        staticmethod(lambda: "offscreen"))
+        self.assertEqual(self.told(), {})
+        self.assertFalse(self.answered)
+
+
+class GivingTheFrontBack(DikteTest):
+    """Opening the microphone brings Dikte to the front, and the window the
+    user was dictating into goes inactive with the caret in it. Nothing can be
+    asked of the capture session, so the front is put back afterwards.
+
+    The watch is driven by hand here: what matters is what it decides, not how
+    long Qt takes to tick.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from dikte import app as dikte_module
+        from dikte import mac_window
+        self.dikte = dikte_module
+        self.activated = []
+        self.patch_attr(mac_window, "activate", self.activate)
+        self.ticks = []
+        outer = self
+
+        class FakeTimer:
+            """Records what it was asked to do and hands over the tick."""
+
+            def __init__(self, _parent):
+                self.interval = None
+                self.running = False
+                outer.ticks.append(self)
+
+            def setInterval(self, milliseconds):
+                self.interval = milliseconds
+
+            def start(self):
+                self.running = True
+
+            def stop(self):
+                self.running = False
+
+            @property
+            def timeout(self):
+                return self
+
+            def connect(self, slot):
+                self.tick = slot
+
+        self.patch_attr(dikte_module, "QTimer", FakeTimer)
+
+        class BareDikte:
+            """As much of the application as this one method touches."""
+
+            app = None
+            _front_watch = None
+            _the_front = dikte_module.Dikte._the_front
+            _give_the_front_back = dikte_module.Dikte._give_the_front_back
+            _stop_watching_the_front = dikte_module.Dikte._stop_watching_the_front
+
+        self.bare = BareDikte
+
+    def activate(self, pid):
+        self.activated.append(pid)
+        return True
+
+    def watching(self, was_in_front, dikte_in_front, on=None):
+        from dikte import mac_window
+        self.patch_attr(mac_window, "is_frontmost", lambda: dikte_in_front)
+        dikte = on if on is not None else self.bare()
+        dikte._give_the_front_back(was_in_front)
+        return self.ticks[-1] if self.ticks else None
+
+    def test_the_front_goes_back_to_whoever_had_it(self):
+        watch = self.watching(4242, dikte_in_front=True)
+        watch.tick()
+        self.assertEqual(self.activated, [4242])
+        self.assertTrue(watch.running)    # accepted is not the same as landed
+        self.patch_attr(self.mac_window_module(), "is_frontmost", lambda: False)
+        watch.tick()
+        self.assertFalse(watch.running)
+
+    def test_an_accepted_restore_is_not_sent_again_while_it_is_landing(self):
+        watch = self.watching(4242, dikte_in_front=True)
+        watch.tick()
+        watch.tick()
+        self.assertEqual(self.activated, [4242])
+        self.assertTrue(watch.running)
+
+    def test_an_accepted_restore_that_never_lands_still_times_out(self):
+        watch = self.watching(4242, dikte_in_front=True)
+        watch.tick()
+        with mock.patch.object(self.dikte.time, "monotonic",
+                               return_value=self.dikte.time.monotonic() + 60):
+            watch.tick()
+        self.assertFalse(watch.running)
+        self.assertEqual(self.activated, [4242])
+
+    def test_a_restore_the_system_refused_is_retried(self):
+        from dikte import mac_window
+        self.patch_attr(mac_window, "activate",
+                        lambda pid: self.activated.append(pid) or False)
+        watch = self.watching(4242, dikte_in_front=True)
+        watch.tick()
+        watch.tick()
+        self.assertEqual(self.activated, [4242, 4242])
+        self.assertTrue(watch.running)
+
+    def test_a_front_that_was_never_taken_is_left_where_it_is(self):
+        """The microphone does not always take it, and pulling an application
+        forward that is already there is one flicker for nothing."""
+        watch = self.watching(4242, dikte_in_front=False)
+        watch.tick()
+        self.assertEqual(self.activated, [])
+        self.assertTrue(watch.running)    # still waiting for the moment
+
+    def test_it_gives_up_rather_than_watching_for_ever(self):
+        watch = self.watching(4242, dikte_in_front=False)
+        with mock.patch.object(self.dikte.time, "monotonic",
+                               return_value=self.dikte.time.monotonic() + 60):
+            watch.tick()
+        self.assertFalse(watch.running)
+        self.assertEqual(self.activated, [])
+
+    def test_a_dictation_started_in_dikte_itself_watches_nothing(self):
+        """Settings is a window of ours, and the front is already where it
+        belongs."""
+        self.assertIsNone(self.watching(os.getpid(), dikte_in_front=True))
+
+    def test_a_second_recording_calls_off_the_watch_the_first_one_left(self):
+        """The older watch remembers where the older recording started, and by
+        now that is the wrong window to be pulling forward."""
+        dikte = self.bare()
+        first = self.watching(4242, dikte_in_front=False, on=dikte)
+        second = self.watching(1111, dikte_in_front=False, on=dikte)
+        self.assertFalse(first.running)
+        self.assertTrue(second.running)
+        second.tick()                      # and the survivor is the new one
+        self.patch_attr(self.mac_window_module(), "is_frontmost", lambda: True)
+        second.tick()
+        self.assertEqual(self.activated, [1111])
+
+    def test_a_recording_nobody_needs_watching_for_still_calls_off_the_old_one(self):
+        """Starting the next one from Dikte's own window is not a reason to
+        leave the last one's watch running."""
+        dikte = self.bare()
+        first = self.watching(4242, dikte_in_front=False, on=dikte)
+        self.watching(os.getpid(), dikte_in_front=False, on=dikte)
+        self.assertFalse(first.running)
+        self.assertIsNone(dikte._front_watch)
+
+    def test_nobody_in_front_is_nobody_to_go_back_to(self):
+        self.assertIsNone(self.watching(None, dikte_in_front=True))
+
+    def mac_window_module(self):
+        from dikte import mac_window
+        return mac_window
+
+
+class EveryRecordingProtectsTheFront(DikteTest):
+    """Three ways in, dictation, agent and meeting, and all three open the same
+    avfoundation capture, so all three take the front the same way. What is
+    checked here is the order: the front has to be noted before the microphone
+    is opened, and the watch armed after, or there is nothing to go back to.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from dikte import app as dikte_module
+        self.dikte = dikte_module
+        self.order = []
+
+    def app(self, **attributes):
+        """A Dikte that records the order it does things in, and nothing else.
+
+        The methods under test are called unbound against it, so the stand-ins
+        go on the object rather than on the class.
+        """
+        dikte = mock.Mock(**attributes)
+        dikte._run_id = 0
+        dikte.conf = {"mic_target": "", "max_seconds": 60,
+                      "meeting_mic_target": "", "meeting_system_target": "",
+                      "meeting_max_seconds": 60}
+        dikte._the_front.side_effect = lambda: self.order.append("noted") or 4242
+        dikte._give_the_front_back.side_effect = (
+            lambda pid: self.order.append(f"watching {pid}"))
+        dikte._begin_recording = (
+            lambda owner: self.dikte.Dikte._begin_recording(dikte, owner))
+        dikte.recorder.start.side_effect = (
+            lambda *_a: self.order.append("microphone"))
+        dikte.meeting_recorder.start.side_effect = (
+            lambda *_a: self.order.append("microphone"))
+        return dikte
+
+    def test_a_dictation_notes_the_front_before_the_indicator_is_even_shown(self):
+        dikte = self.app(state=self.dikte.IDLE, recording=False)
+        dikte.overlay.show_recording.side_effect = (
+            lambda *_a: self.order.append("indicator"))
+        self.dikte.Dikte.start(dikte)
+        self.assertEqual(self.order,
+                         ["noted", "indicator", "microphone", "watching 4242"])
+
+    def test_the_agent_does_the_same(self):
+        dikte = self.app(ask_state=self.dikte.IDLE, recording=False)
+        self.dikte.Dikte.start_ask(dikte)
+        self.assertEqual(self.order, ["noted", "microphone", "watching 4242"])
+
+    def test_a_meeting_does_the_same(self):
+        """The one most worth protecting: the user is in a call."""
+        dikte = self.app(meeting_state=self.dikte.M_IDLE)
+        dikte.meeting_recorder.active = True
+        self.dikte.Dikte.start_meeting(dikte)
+        self.assertEqual(self.order, ["noted", "microphone", "watching 4242"])
+
+    def test_a_meeting_whose_microphone_never_opened_watches_nothing(self):
+        dikte = self.app(meeting_state=self.dikte.M_IDLE)
+        dikte.meeting_recorder.active = False
+        self.dikte.Dikte.start_meeting(dikte)
+        self.assertEqual(self.order, ["noted", "microphone"])
 
 class Overlay(DikteTest):
     def overlay(self, **kwargs):
@@ -610,12 +955,49 @@ class Overlay(DikteTest):
         self.assertFalse(widget.muted)
 
 
+class MeetingSources(DikteTest):
+    """What the Meeting tab says about the far side, per sound system.
+
+    The box that picks it is empty on a system that cannot record it, and an
+    empty box with nothing next to it reads as a list that has not loaded yet.
+    """
+
+    def notes(self, meetings):
+        with mock.patch.object(audio, "sound",
+                               return_value=audio.PULSE._replace(
+                                   meetings=meetings)), \
+                only_these_tools(), \
+                mock.patch.object(settings_ui.SettingsWindow, "_load_models"), \
+                mock.patch.object(settings_ui.SettingsWindow,
+                                  "_load_transcribe_models"):
+            window = settings_ui.SettingsWindow(cfg.Config())
+        self.addCleanup(window.deleteLater)
+        self.addCleanup(window.close)
+        return " ".join(label.text()
+                        for label in window.findChildren(settings_ui.QLabel))
+
+    def test_a_system_that_cannot_record_the_far_side_says_so(self):
+        self.assertIn("nothing that records what the speakers",
+                      self.notes(meetings=False))
+
+    def test_a_system_that_can_says_nothing_of_the_sort(self):
+        self.assertNotIn("nothing that records what the speakers",
+                         self.notes(meetings=True))
+
+
 if __name__ == "__main__":
     unittest.main()
 
 
 class LocalModels(DikteTest):
     """The download boxes, without a network and without either program."""
+
+    def setUp(self):
+        super().setUp()
+        # A machine Dikte is actually installed on would otherwise answer the
+        # "nothing can transcribe" question from its real binary and model.
+        self.patch_attr(ggml, "BIN_DIR", self.path("bin"))
+        self.patch_attr(ggml, "MODELS_DIR", self.path("models"))
 
     def window(self, conf):
         window = settings_ui.SettingsWindow(conf)

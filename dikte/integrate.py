@@ -6,6 +6,12 @@ downloaded an AppImage or dragged Dikte.app out of a disk image ran no
 installer at all, so the application writes those files itself, on its first
 run and again whenever the file it was started from has moved.
 
+Windows is the one platform where the download is an installer, and it wrote
+the Start Menu entry, the `dikte` command and the uninstaller as it ran. What
+is left here is the one thing it can only ask about once: whether Dikte starts
+when you sign in. `dikte integrate` turns that on later and `--remove` turns it
+off, and a plain start only repairs an entry that is already there.
+
 Nothing here runs from a checkout. install.sh has already written the same
 files there, pointing at the interpreter that checkout was installed against,
 and overwriting them with a guess would be a downgrade.
@@ -34,6 +40,15 @@ import sys
 AGENT_ID = "io.github.yusufipk.dikte"
 ICON_NAME = "dikte"
 DESKTOP_FILE = "dikte.desktop"
+MACOS_COMMAND_MARKER = "# Written by Dikte itself. Delete it to be rid of it.\n"
+# The windowed executable the Windows setup installs, beside the console one
+# the `dikte` command runs.
+WINDOWS_APP = "Dikte.exe"
+# Where Windows keeps what to start when somebody signs in, and the name the
+# setup program files Dikte's entry under. Both halves have to agree: the
+# uninstaller deletes this value, and so does `dikte integrate --remove`.
+RUN_KEY = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+RUN_VALUE = "Dikte"
 
 
 def packaged():
@@ -55,6 +70,13 @@ def target():
         for parent in executable.parents:
             if parent.suffix == ".app":
                 return parent
+    if sys.platform == "win32":
+        # The windowed executable, whichever of the two is running: the console
+        # one is what the `dikte` command names, and a sign-in that started
+        # that one would open a console window nobody asked for.
+        windowed = executable.with_name(WINDOWS_APP)
+        if windowed.is_file():
+            return windowed
     return executable
 
 
@@ -151,11 +173,12 @@ def use_system_certificates():
 def bundled_bin():
     """Where a build keeps the helper programs it carries, if it carries any.
 
-    The disk image ships an ffmpeg because macOS records through one and has
-    nothing like it preinstalled, so a Mac that downloaded Dikte and nothing
-    else would otherwise not be able to record at all. The AppImage carries
-    none: Linux records through parec or pw-record, which come with the sound
-    server, and the distributions all package ffmpeg for the rest.
+    The disk image and the Windows setup both ship an ffmpeg, because both
+    systems record through one and neither has anything like it preinstalled,
+    so a machine that downloaded Dikte and nothing else would otherwise not be
+    able to record at all. The AppImage carries none: Linux records through
+    parec or pw-record, which come with the sound server, and the distributions
+    all package ffmpeg for the rest.
     """
     binary = pathlib.Path(sys.executable).parent
     if sys.platform == "darwin" and binary.name == "MacOS":
@@ -209,6 +232,8 @@ def install(force=False):
     """
     if sys.platform == "darwin":
         return _macos_install(target(), force)
+    if sys.platform == "win32":
+        return _windows_install(target(), force)
     return _linux_install(target(), force)
 
 
@@ -216,6 +241,8 @@ def remove():
     """Take them away again. The paths that were there to delete."""
     if sys.platform == "darwin":
         return _macos_remove()
+    if sys.platform == "win32":
+        return _windows_remove()
     return _linux_remove()
 
 
@@ -398,6 +425,20 @@ def _agent_path():
     return pathlib.Path.home() / "Library" / "LaunchAgents" / f"{AGENT_ID}.plist"
 
 
+def _macos_command_path():
+    return pathlib.Path.home() / ".local" / "bin" / "dikte"
+
+
+def _macos_command_is_ours(command):
+    """Whether this is the wrapper a downloaded Mac build wrote itself."""
+    try:
+        return command.is_file() and MACOS_COMMAND_MARKER in command.read_text(
+            encoding="utf-8"
+        )
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def _agent_plist(app):
     """Through `open` rather than the executable inside the bundle, so that the
     process is one LaunchServices started: that is what gives it the bundle's
@@ -449,13 +490,13 @@ def _macos_install(app, force=False):
     # The command, as a wrapper rather than a symlink: the executable has to be
     # run from inside the bundle for macOS to file its permissions under Dikte,
     # and a symlink somewhere else is a different process to macOS.
-    command = pathlib.Path.home() / ".local" / "bin" / "dikte"
+    command = _macos_command_path()
     binary = app / "Contents" / "MacOS" / "Dikte"
-    marker = "# Written by Dikte itself. Delete it to be rid of it.\n"
-    script = f'#!/bin/sh\n{marker}exec {shlex.quote(str(binary))} "$@"\n'
+    script = (f'#!/bin/sh\n{MACOS_COMMAND_MARKER}'
+              f'exec {shlex.quote(str(binary))} "$@"\n')
     # install-mac.sh writes its own wrapper here, naming the checkout's Python.
     # Ours only replaces a wrapper it wrote before, or nothing at all.
-    ours = command.exists() and marker in command.read_text(encoding="utf-8")
+    ours = _macos_command_is_ours(command)
     if (not command.exists() or ours or force) and _write(command, script):
         command.chmod(0o755)
         written.append(command)
@@ -470,6 +511,10 @@ def _macos_remove():
                        capture_output=True, check=False)
         agent.unlink()
         gone.append(agent)
+    command = _macos_command_path()
+    if _macos_command_is_ours(command):
+        command.unlink()
+        gone.append(command)
     return gone
 
 
@@ -481,3 +526,73 @@ def _launchctl_reload(agent):
                    capture_output=True, check=False)
     subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(agent)],
                    capture_output=True, check=False)
+
+
+# --- Windows --------------------------------------------------------------
+#
+# The setup program did the installing here, which leaves one question a
+# wizard can only ask while it is on the screen: whether Dikte starts when you
+# sign in. That answer is a registry value, so it is one both sides can write:
+# the setup program sets it from the tick box, the uninstaller deletes it
+# however it got there, and the two functions below are the same switch from a
+# terminal, long after the wizard is gone.
+
+
+def _run_entry():
+    """What the autostart entry names, or "" when there is none."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            value, kind = winreg.QueryValueEx(key, RUN_VALUE)
+    except OSError:
+        return ""
+    return value if kind == winreg.REG_SZ and isinstance(value, str) else ""
+
+
+def _write_run_entry(command):
+    import winreg
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+        winreg.SetValueEx(key, RUN_VALUE, 0, winreg.REG_SZ, command)
+
+
+def _delete_run_entry():
+    """Whether there was one to delete."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
+                            winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, RUN_VALUE)
+    except OSError:
+        return False
+    return True
+
+
+def _run_entry_name():
+    """What to call the value in a listing, since it is not a file."""
+    return f"HKCU\\{RUN_KEY}\\{RUN_VALUE}"
+
+
+def _windows_install(app, force=False):
+    """Point the autostart entry at this build. What changed.
+
+    Only `force`, which is what typing `dikte integrate` means, creates one.
+    The call on every start repairs an entry that is already there and names an
+    executable somewhere else, which is what an installation moved to another
+    drive or reinstalled into another directory leaves behind; somebody who
+    unticked the box in the wizard, or turned it off since, is not asked again
+    by every start.
+    """
+    command = f'"{app}"'
+    current = _run_entry()
+    if not current and not force:
+        return []
+    if current == command:
+        return []
+    _write_run_entry(command)
+    return [_run_entry_name()]
+
+
+def _windows_remove():
+    """Stop starting at sign-in. The Start Menu entry, the command and the
+    files are the uninstaller's, and Add/Remove Programs is where they go."""
+    return [_run_entry_name()] if _delete_run_entry() else []

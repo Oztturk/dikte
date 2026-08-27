@@ -5,10 +5,10 @@ machine by default, a model cleans it up (dropping the *uh*s, the restarts, the
 missing punctuation), and the result lands in your clipboard and is pasted into
 whatever window you were typing in.
 
-Built for KDE Plasma 6 on Wayland, and runs on GNOME X11, macOS and any other
-Linux desktop that will let it read the keyboard. No
-dependencies beyond system packages: just the Python standard library, 3.11 or
-newer, and PyQt6.
+Built for KDE Plasma 6 on Wayland, and runs on GNOME X11, macOS,
+[Windows](README.windows.md) and any other Linux desktop that will let it read
+the keyboard. No dependencies beyond system packages: just the Python standard
+library, 3.11 or newer, and PyQt6.
 
 *[Türkçe README](README.tr.md)*
 
@@ -24,15 +24,17 @@ newer, and PyQt6.
 
 ## Install
 
-The [releases page](../../releases) has an AppImage and a disk image per Mac
-architecture. Both write their own menu entry, login item and `dikte` command
-the first time they run, and stand aside for an installation already on the
-machine; `dikte integrate --remove` takes them back. The AppImage still wants
-the system packages below, for the sound server, the clipboard and the
-keyboard. The disk image is signed with no Apple certificate, so the first
-launch is refused until you press **Open Anyway** under System Settings →
-Privacy & Security, and macOS asks for the microphone and Accessibility again
-after each update; installing from a checkout is what avoids that.
+The [releases page](../../releases) has an AppImage, a disk image per Mac
+architecture and a Windows setup. The first two write their own menu entry,
+login item and `dikte` command the first time they run, and stand aside for an
+installation already on the machine; `dikte integrate --remove` takes them
+back. The AppImage still wants the system packages below, for the sound
+server, the clipboard and the keyboard. The disk image is signed with no Apple
+certificate, so the first launch is refused until you press **Open Anyway**
+under System Settings → Privacy & Security, and macOS asks for the microphone
+and Accessibility again after each update; installing from a checkout is what
+avoids that. The Windows setup installs for your account alone and carries an
+ffmpeg with it.
 
 ```sh
 sudo pacman -S --needed pipewire-audio wl-clipboard ydotool ffmpeg python-pyqt6
@@ -93,11 +95,22 @@ Dikte talks to. Build it (`cmake -B build -DWHISPER_BUILD_SERVER=ON
 transcribe in the cloud. A meeting needs BlackHole or Loopback
 (`brew install blackhole-2ch`); dictation does not.
 
+Windows works the same way, holding the keys through the system's own hotkey
+service while Dikte runs. The setup on the releases page carries the ffmpeg
+recording needs and asks for no administrator; from a checkout it is `winget
+install Gyan.FFmpeg`, `pip install PyQt6`, then `python -m dikte`, with an
+optional `install.ps1` for the Start Menu entry and the `dikte` command.
+Meetings are not supported there yet; the details are in the
+[Windows README](README.windows.md).
+
 `install.sh` adds the `dikte` command, a menu entry, an autostart entry and the
 two global shortcuts, whose keys are its two arguments, or the ones already in
 your settings when it is given none. `./scripts/update.sh` pulls and puts all of
 that back; `./scripts/uninstall.sh` takes it away again and leaves your settings
-and dictations alone unless you pass `--purge`.
+and dictations alone unless you pass `--purge`. Dikte looks at the releases page
+once a day and puts a line in the tray menu when a newer version is out, which
+opens the page rather than installing anything; the General tab turns that off
+or runs it on the spot.
 
 Speech to text and cleanup each pick a provider in the settings window, and both
 run here by default, on models of your own. The cloud is the other option:
@@ -120,6 +133,7 @@ set next to it.
 | Speak a command to an agent | Tray menu → *Ask Claude*, or `dikte ask` |
 | Start / end a meeting | Tray menu → *Record a meeting*, or `dikte meeting` |
 | Settings | Tray menu → *Settings*, or `dikte settings` |
+| Look for a newer version | General tab → *Check now*, or `dikte update` |
 | Reload after an update | Tray menu → *Restart*, or `dikte restart` |
 | Quit | Tray menu → *Quit*, or `dikte quit` |
 
@@ -215,8 +229,9 @@ keys.
 Everything below is in the `dikte` package, which is what `python3 -m dikte`
 runs and what the `__main__.py` in it hands to every launcher and shortcut.
 `scripts/` holds install-mac.sh, update.sh, uninstall.sh and release.sh;
-`packaging/` builds the AppImage and the disk image that release.sh's tag
-publishes; install.sh stays at the top, and `tests/` has a file per module.
+`packaging/` builds the AppImage, the disk image and the Windows setup that
+release.sh's tag publishes; install.sh stays at the top, and `tests/` has a
+file per module.
 
 ```
 app.py            entry point, tray icon, state machine
@@ -229,6 +244,7 @@ api.py            transcription and cleanup requests (stdlib only)
 cleanup.py        who rewrites the transcript: OpenRouter, here, Claude or Codex
 ggml.py           whisper.cpp and llama.cpp here: fetch, verify, keep serving
 hub.py            what GitHub and Hugging Face have on offer today
+update.py         whether a newer release is out, and the page it is on
 worker.py         transcribe → clean up → clipboard → paste
 vad.py            deciding whether a recording holds speech at all
 filetranscribe.py file transcription: ffmpeg, chunking, timestamps

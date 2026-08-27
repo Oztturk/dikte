@@ -109,6 +109,10 @@ TR = {
         "Ses kayıt aracı bulunamadı. pulseaudio-utils ya da pipewire-audio kur.",
     "ffmpeg not found. Install it with: brew install ffmpeg":
         "ffmpeg bulunamadı. Şununla kur: brew install ffmpeg",
+    "ffmpeg or a microphone was not found. Install ffmpeg with: "
+    "winget install Gyan.FFmpeg":
+        "ffmpeg ya da bir mikrofon bulunamadı. ffmpeg'i şununla kur: "
+        "winget install Gyan.FFmpeg",
     "Audio recorder stopped before receiving sound: {error}":
         "Ses kayıt aracı veri alamadan kapandı: {error}",
     "Could not copy to clipboard: {error}": "Panoya kopyalanamadı: {error}",
@@ -185,6 +189,25 @@ TR = {
         "Sessiz kayıtları atla (API'ye gönderme)",
     "Silence threshold": "Sessizlik eşiği",
     "Keep audio files ({path})": "Ses kayıtlarını sakla ({path})",
+
+    # --- updates --------------------------------------------------------
+    "Updates": "Güncelleme",
+    "Look for a newer version once a day": "Günde bir kez yeni sürüm var mı diye bak",
+    "Dikte only looks. What it finds opens the release page in your browser; "
+    "it downloads and installs nothing by itself.":
+        "Dikte yalnızca bakar. Bulduğu şey tarayıcında sürüm sayfasını açar; "
+        "kendi başına hiçbir şey indirmez ve kurmaz.",
+    "Check now": "Şimdi bak",
+    "Looking…": "Bakılıyor…",
+    "Open the release page": "Sürüm sayfasını aç",
+    "This is Dikte {version}.": "Buradaki sürüm Dikte {version}.",
+    "Dikte {version} is the newest release.": "En yeni sürüm zaten bu: Dikte {version}.",
+    "Dikte {version} is out; this is {current}.":
+        "Dikte {version} çıkmış; buradaki sürüm {current}.",
+    "Dikte {version} is out…": "Dikte {version} çıkmış…",
+    "Dikte {version} is out. The tray menu has the release page.":
+        "Dikte {version} çıkmış. Sürüm sayfası tepsi menüsünde.",
+    "{repo} has published no release.": "{repo} için yayımlanmış sürüm yok.",
 
     # --- settings: api --------------------------------------------------
     "Keys": "Anahtarlar",
@@ -291,6 +314,10 @@ TR = {
     "Converting audio…": "Ses dönüştürülüyor…",
     "Splitting into {count} chunks…": "{count} parçaya bölünüyor…",
     "Transcribing chunk {index}/{count}…": "{index}/{count} parça yazıya çevriliyor…",
+    "{error} Trying again ({attempt}/{total})…":
+        "{error} Yeniden deneniyor ({attempt}/{total})…",
+    "{error} The transcript up to there is below.":
+        "{error} Oraya kadar çevrilen metin aşağıda.",
     "Done: {chars} characters.": "Bitti: {chars} karakter.",
     "Stopped.": "Durduruldu.",
     "Failed: {error}": "Başarısız: {error}",
@@ -351,6 +378,11 @@ TR = {
     "meantime.":
         "Dikte bu kombinasyonları çalışırken macOS'tan kendisi ister. Hiçbir şey "
         "kurulmaz ve o sırada başka hiçbir uygulama bu tuşları almaz.",
+    "Dikte asks Windows for these combinations itself, while it is running. "
+    "Nothing is installed, and no other application receives them in the "
+    "meantime.":
+        "Dikte bu kombinasyonları çalışırken Windows'tan kendisi ister. Hiçbir şey "
+        "kurulmaz ve o sırada başka hiçbir uygulama bu tuşları almaz.",
     "{desktop} keeps no shortcut registry, so Dikte listens for these "
     "combinations itself while it is running. Your user has to be able to read "
     "/dev/input for that, and the focused application receives the keys as "
@@ -389,6 +421,12 @@ TR = {
         "macOS kısayol servisine ulaşılamadı: {error}",
     "macOS would not give Dikte {shortcut}; another application already holds it.":
         "macOS {shortcut} kombinasyonunu Dikte'ye vermedi; başka bir uygulama "
+        "onu şimdiden tutuyor.",
+    "Could not reach the Windows shortcut service: {error}":
+        "Windows kısayol servisine ulaşılamadı: {error}",
+    "Windows would not give Dikte {shortcut}; another application already "
+    "holds it.":
+        "Windows {shortcut} kombinasyonunu Dikte'ye vermedi; başka bir uygulama "
         "onu şimdiden tutuyor.",
     "Cannot read /dev/input. Your user needs to be in the 'input' group:\n"
     "  sudo usermod -aG input $USER   (then log out and back in)":
@@ -641,6 +679,16 @@ TR = {
         "macOS, hoparlörden çıkan sesi kaydedilebilir bir kaynak olarak sunmaz. "
         "BlackHole ya da Loopback kur, toplantının sesini oradan geçir ve "
         "yukarıdan onu seç.",
+    "This system offers nothing that records what the speakers are playing, "
+    "so a meeting cannot be recorded on it. Dictation and transcribing a file "
+    "are unaffected.":
+        "Bu sistem, hoparlörden çıkan sesi kaydeden hiçbir şey sunmuyor; "
+        "burada toplantı kaydedilemez. Dikte ve dosya deşifresi bundan "
+        "etkilenmez.",
+    "This system offers nothing that records what the speakers are playing, "
+    "so a meeting cannot be recorded on it.":
+        "Bu sistem, hoparlörden çıkan sesi kaydeden hiçbir şey sunmuyor; "
+        "burada toplantı kaydedilemez.",
     "Wear headphones if you can. Through speakers your microphone hears the "
     "other side as well, and although a line that lands on both channels at "
     "once is dropped again, the repair is never as clean as not needing it.":

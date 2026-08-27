@@ -1,15 +1,19 @@
 """Transcribe an existing audio/video file with the same models.
 
 ffmpeg converts whatever comes in to 16 kHz mono WAV, and for a hosted API to
-mp3 on top of that. The upload limit is the only reason a file is ever cut up,
-and uncompressed audio reaches it after ten minutes where mp3 takes an hour.
+mp3 on top of that. Two things decide where a file is cut up: the upload limit,
+which uncompressed audio reaches after ten minutes where mp3 takes an hour, and
+the clock. An hour of audio in one request is minutes of work at the other end,
+and the gateway in front of the model hangs up long before the answer comes
+back, which arrives here as a 502 with the whole chunk lost. So a chunk is also
+capped at MAX_CHUNK_SECONDS however small it is on disk.
 
-That is worth the encoder, because a cut is not free. Whisper hears in thirty
-second windows and decides for itself where one cue ends and the next begins; a
-chunk that starts in the middle of a sentence can come back as one cue per
-window, twenty seconds of text at a time, for the whole rest of the chunk. So
-the file is cut as rarely as the limit allows, what is cut overlaps, and
-stitch() drops the half that was heard twice.
+A cut is not free, which is what the encoder buys and why nothing is cut more
+finely than that. Whisper hears in thirty second windows and decides for itself
+where one cue ends and the next begins; a chunk that starts in the middle of a
+sentence can come back as one cue per window, twenty seconds of text at a time,
+for the whole rest of the chunk. So what is cut overlaps, and stitch() drops
+the half that was heard twice.
 """
 
 import contextlib
@@ -19,6 +23,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import wave
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -29,10 +34,14 @@ from . import ggml
 from .i18n import t
 
 UPLOAD_LIMIT = 24 * 1024 * 1024  # the APIs take 25 MB; leave the form its room
+MAX_CHUNK_SECONDS = 900      # as much audio as a hosted request can outlive
 MP3_BITRATE = "48k"          # mono speech at 16 kHz: whisper hears nothing less
 OVERLAP_SECONDS = 30         # a whisper window: how far back a chunk starts
 WAV_CHUNK_SECONDS = 600      # 19 MB, for the caller that uploads the WAV itself
 CLEANUP_CHUNK_CHARS = 12000  # keep each cleanup call comfortably small
+HOSTED_TIMEOUT = 600         # a quarter hour of audio, with room for the upload
+RETRIES = 3                  # how many times one chunk is asked for in all
+RETRY_WAIT = 5               # seconds before the second try, doubled after that
 RATE = 16000
 MIN_SUBTITLE_SECONDS = 1.5   # how long a cue with no end time of its own stays up
 
@@ -86,9 +95,40 @@ class FileTranscriber(QObject):
     def _check(self):
         self._abort.check()
 
+    def _wait(self, seconds):
+        """Sleep on it, with the Stop button still able to get through."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            self._check()
+            time.sleep(0.25)
+        self._check()
+
+    def _attempt(self, call, stage):
+        """`call`, asked again when what failed was the network rather than us.
+
+        One chunk is a quarter hour of audio that took a minute to encode and a
+        minute to upload, so a gateway having a bad moment is worth waiting out
+        rather than throwing the run away over. `stage` is what the status line
+        said before the failure, put back once the wait is over.
+        """
+        for attempt in range(1, RETRIES + 1):
+            self._check()
+            try:
+                return call()
+            except api.ApiError as exc:
+                if attempt == RETRIES or not exc.retryable:
+                    raise
+                self.progress.emit(t(
+                    "{error} Trying again ({attempt}/{total})…",
+                    error=exc, attempt=attempt + 1, total=RETRIES))
+                self._wait(RETRY_WAIT * 2 ** (attempt - 1))
+                self.progress.emit(stage)
+
     def _work(self, path, timestamps, do_cleanup):
         conf = self.conf
         workdir = None
+        pieces = []
+        segments = []
         try:
             if not shutil.which("ffmpeg"):
                 raise api.ApiError(t("ffmpeg not found. Install it to transcribe files."))
@@ -104,39 +144,36 @@ class FileTranscriber(QObject):
             if len(chunks) > 1:
                 self.progress.emit(t("Splitting into {count} chunks…", count=len(chunks)))
 
-            pieces = []
-            segments = []
             for index, (chunk_path, offset) in enumerate(chunks, start=1):
                 self._check()
-                self.progress.emit(
-                    t("Transcribing chunk {index}/{count}…",
-                      index=index, count=len(chunks))
-                    if len(chunks) > 1 else t("Transcribing…")
-                )
+                stage = (t("Transcribing chunk {index}/{count}…",
+                           index=index, count=len(chunks))
+                         if len(chunks) > 1 else t("Transcribing…"))
+                self.progress.emit(stage)
                 if timestamps:
-                    segments = stitch(segments, [
-                        (start + offset, end + offset, line)
-                        for start, end, line in api.transcribe_segments(
-                            target,
-                            chunk_path,
-                            language=conf["language"],
-                            prompt=conf["transcribe_prompt"],
-                            aborter=self._abort,
-                        )
-                    ])
-                else:
-                    pieces.append(api.transcribe(
+                    heard = self._attempt(lambda: api.transcribe_segments(
                         target,
                         chunk_path,
                         language=conf["language"],
                         prompt=conf["transcribe_prompt"],
+                        timeout=HOSTED_TIMEOUT,
                         aborter=self._abort,
-                    ))
+                    ), stage)
+                    segments = stitch(segments, [
+                        (start + offset, end + offset, line)
+                        for start, end, line in heard
+                    ])
+                else:
+                    pieces.append(self._attempt(lambda: api.transcribe(
+                        target,
+                        chunk_path,
+                        language=conf["language"],
+                        prompt=conf["transcribe_prompt"],
+                        timeout=HOSTED_TIMEOUT,
+                        aborter=self._abort,
+                    ), stage))
 
-            if timestamps:
-                pieces = [f"[{format_timestamp(start)}] {line}"
-                          for start, _, line in segments]
-            text = "\n".join(pieces) if timestamps else " ".join(pieces)
+            text = _joined(pieces, segments, timestamps)
 
             if do_cleanup and text:
                 self._check()
@@ -148,7 +185,16 @@ class FileTranscriber(QObject):
         except Cancelled:
             self.progress.emit(t("Stopped."))
         except (api.ApiError, OSError, subprocess.SubprocessError, wave.Error) as exc:
-            self.failed.emit(str(exc))
+            # An hour of a long file already heard is not worth throwing away
+            # because the chunk after it failed, or because cleanup did. Hand
+            # over what there is, and say in the same breath where it stops.
+            partial = _joined(pieces, segments, timestamps)
+            if partial:
+                self.finished.emit(partial, segments)
+                self.failed.emit(t("{error} The transcript up to there is below.",
+                                   error=exc))
+            else:
+                self.failed.emit(str(exc))
         finally:
             self._local = None
             if workdir:
@@ -181,10 +227,19 @@ class FileTranscriber(QObject):
         self._local = ggml.llm if cleanup.provider(conf) == "local" else None
         prompt = conf.cleanup_prompt(with_timestamps=timestamps, subtitles=True)
         out = []
+        stage = t("Cleaning up…")
         for block in split_text(text, timestamps):
             self._check()
-            out.append(cleanup.run(block, conf, prompt, aborter=self._abort))
+            out.append(self._attempt(
+                lambda: cleanup.run(block, conf, prompt, aborter=self._abort), stage))
         return ("\n" if timestamps else "\n\n").join(out)
+
+
+def _joined(pieces, segments, timestamps):
+    """The transcript as one string, out of whichever of the two is holding it."""
+    if timestamps:
+        pieces = [f"[{format_timestamp(start)}] {line}" for start, _, line in segments]
+    return "\n".join(pieces) if timestamps else " ".join(pieces)
 
 
 def format_timestamp(seconds):
@@ -283,6 +338,7 @@ def _ffmpeg(args, out, aborter=None):
         ["ffmpeg", "-nostdin", "-y", *args],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     # A two hour film is a minute of ffmpeg, which is a minute of a Stop button
     # doing nothing unless the abort reaches the process itself.
@@ -308,13 +364,20 @@ def wav_seconds(wav_path):
 def chunk_seconds(path, duration):
     """How many seconds of this audio fit in one request, or 0 when all of it does.
 
-    Measured rather than worked out: what an encoder makes of an hour of speech
-    depends on the speech, and the file on disk is the only honest answer.
+    Whichever of the two limits bites first. How much fits under the upload
+    limit is measured rather than worked out: what an encoder makes of an hour
+    of speech depends on the speech, and the file on disk is the only honest
+    answer. The other limit is MAX_CHUNK_SECONDS, and it is the one that catches
+    a long file at this bitrate: an hour and a half of mp3 is two chunks by size
+    and one of them is an hour of audio in a single request, which no hosted
+    gateway stays on the line for.
     """
-    size = os.path.getsize(path)
-    if size <= UPLOAD_LIMIT or duration <= 0:
+    if duration <= 0:
         return 0.0
-    return max(60.0, duration * UPLOAD_LIMIT / size * 0.95)
+    size = os.path.getsize(path)
+    fits = duration * UPLOAD_LIMIT / size * 0.95 if size > UPLOAD_LIMIT else duration
+    seconds = max(60.0, min(fits, MAX_CHUNK_SECONDS))
+    return 0.0 if seconds >= duration else seconds
 
 
 def split_wav(wav_path, workdir, seconds=WAV_CHUNK_SECONDS, overlap=OVERLAP_SECONDS):

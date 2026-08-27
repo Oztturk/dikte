@@ -17,8 +17,10 @@ import json
 import os
 import shutil
 import signal
+import subprocess
 import sys
 import time
+import webbrowser
 
 from PyQt6.QtCore import QCoreApplication, QTimer
 
@@ -29,10 +31,12 @@ from . import cleanup
 from . import config as cfg
 from . import filetranscribe
 from . import hotkey
+from . import hub
 from . import ipc
 from . import integrate
 from . import meeting
 from . import paste
+from . import update
 from . import __version__
 
 NOT_RUNNING = 3
@@ -136,6 +140,16 @@ def launch_gui(verb=""):
     if verb:
         args.append(verb)
     args.append("--gui")
+    if sys.platform == "win32":
+        # execv on Windows mangles arguments with spaces and would leave the
+        # application tied to this console; start it detached instead.
+        subprocess.Popen(
+            args,
+            creationflags=(subprocess.DETACHED_PROCESS
+                           | subprocess.CREATE_NEW_PROCESS_GROUP),
+            close_fds=True,
+        )
+        sys.exit(0)
     os.execv(args[0], args)
 
 
@@ -299,6 +313,9 @@ def cmd_transcribe(opts):
         return fail(opts, f"no such file: {path}")
 
     conf = cfg.Config()
+    # This runs here rather than in the instance, so the local servers have to
+    # be handed their settings here too; the GUI does this at startup.
+    conf.apply_local()
     timestamps = opts.srt or _pick(opts.timestamps, conf["file_timestamps"])
     worker = filetranscribe.FileTranscriber(conf)
 
@@ -643,7 +660,10 @@ def cmd_devices(opts):
                  "default": name == default}
                 for name, desc in audio.list_monitors()]
     if not mics and not monitors:
-        return fail(opts, "pactl found nothing; is PipeWire running?")
+        # Which program was asked, and so which one to go and look at, is not
+        # the same on all four systems: naming pactl on Windows sends somebody
+        # after a program that was never going to be there.
+        return fail(opts, audio.sound().missing)
 
     lines = ["Microphones:"]
     lines += [f"  {'*' if item['chosen'] else ' '} {item['name']}\n"
@@ -760,11 +780,14 @@ def cmd_integrate(opts):
 
     Run for you on every start, so this is for the two cases that start does
     not cover: undoing it, and repairing it from a terminal after the AppImage
-    was moved while Dikte was not running.
+    was moved while Dikte was not running. On Windows the setup program wrote
+    the rest, and what is left for this is the switch it could only offer while
+    it was on the screen: typing it starts Dikte at sign-in, --remove stops it.
     """
     if not integrate.packaged():
+        installer = "install.ps1" if sys.platform == "win32" else "./install.sh"
         return fail(opts, "this is a checkout, not a downloaded build; "
-                          "./install.sh writes those files here", 2)
+                          f"{installer} writes those files here", 2)
     try:
         # force, because typing this is asking for it outright, where the same
         # call on every start stands aside for an installation already there.
@@ -775,6 +798,33 @@ def cmd_integrate(opts):
     listing = "\n".join(f"  {path}" for path in paths)
     return out(opts, {"ok": True, "paths": [str(path) for path in paths]},
                f"{verb}:\n{listing}" if paths else "Nothing to change.")
+
+
+def cmd_update(opts):
+    """Whether a newer Dikte has been released, and where it is.
+
+    It looks and nothing more: what to do about the answer is a download page,
+    because the AppImage, the disk image, the Windows setup and a checkout are
+    four different installations and only their owner knows which one this is.
+    """
+    try:
+        release = update.latest(refresh=True)
+    except hub.HubError as exc:
+        return fail(opts, exc)
+    # Written down even when there is nothing new, so that the application does
+    # not go and ask the same question an hour later.
+    update.remember(release)
+    waiting = update.newer(release.version)
+    payload = {"ok": True, "current": __version__, "latest": release.version,
+               "update": waiting, "url": release.url}
+    if not waiting:
+        return out(opts, payload,
+                   f"Dikte {__version__} is the newest release.")
+    if opts.open:
+        webbrowser.open(release.url)
+    return out(opts, payload,
+               f"Dikte {release.version} is out; this is {__version__}.\n"
+               f"{release.url}")
 
 
 def cmd_status(opts):
@@ -802,9 +852,20 @@ def cmd_status(opts):
 def cmd_doctor(opts):
     """What the settings window checks behind its buttons, in one pass."""
     conf = cfg.Config()
-    wanted = ["pw-record", "wl-copy", "ydotool", "ffmpeg", "pactl", "kwriteconfig6",
-              assistant.executable(assistant.provider(conf)) or "claude",
-              cleanup.executable(cleanup.provider(conf))]
+    # The two the clipboard and the key press go through come out of the table
+    # rather than being spelled here, because they are not the same pair on all
+    # four systems: X11 pastes with xclip where Wayland pastes with wl-copy, a
+    # Mac shells out for one half and Windows for neither. A row saying ydotool
+    # is missing on a machine that would never have run it is not a diagnosis,
+    # it is a red mark to explain away.
+    here = paste.desktop()
+    wanted = [here.clipboard, here.keyboard]
+    if sys.platform.startswith("linux"):
+        # Recording, the device list, and KDE's shortcut registry.
+        wanted += ["pw-record", "pactl", "kwriteconfig6"]
+    wanted += ["ffmpeg",
+               assistant.executable(assistant.provider(conf)) or "claude",
+               cleanup.executable(cleanup.provider(conf))]
     programs = {name: shutil.which(name) or "" for name in wanted if name}
     target = conf.transcribe_target()
     cleaner = cleanup.provider(conf)
@@ -1060,12 +1121,18 @@ def build_parser():
     remove.set_defaults(func=cmd_shortcut)
 
     integrated = leaf(subs, "integrate",
-                      "menu entry, login item and command, for a downloaded build")
+                      "menu entry, start at sign-in and command, "
+                      "for a downloaded build")
     integrated.add_argument("--remove", action="store_true",
                             help="take them away again")
     integrated.set_defaults(func=cmd_integrate)
 
     # --- the application --------------------------------------------------
+    updates = leaf(subs, "update", "whether a newer Dikte has been released")
+    updates.add_argument("--open", action="store_true",
+                         help="open the release page in a browser")
+    updates.set_defaults(func=cmd_update)
+
     leaf(subs, "status", "what it is doing right now").set_defaults(func=cmd_status)
     for name, help_text in (("settings", "open the settings window"),
                             ("restart", "reload the running instance"),

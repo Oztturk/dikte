@@ -15,29 +15,50 @@ from dikte import paths
 
 
 class Directories(unittest.TestCase):
+    """Spelled with forward slashes throughout.
+
+    A backslash separates on Windows only, and every one of these runs on all
+    three systems: `as_posix()` is the one spelling they can all be read in.
+    """
+
     def test_linux_keeps_them_apart_and_follows_xdg(self):
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c",
                                           "XDG_DATA_HOME": "/d"}):
             config_dir, data_dir = paths.directories("linux")
-        self.assertEqual(str(config_dir), "/c/dikte")
-        self.assertEqual(str(data_dir), "/d/dikte")
+        self.assertEqual(config_dir.as_posix(), "/c/dikte")
+        self.assertEqual(data_dir.as_posix(), "/d/dikte")
 
     def test_linux_without_the_variables_set(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             config_dir, data_dir = paths.directories("linux")
-        self.assertTrue(str(config_dir).endswith("/.config/dikte"))
-        self.assertTrue(str(data_dir).endswith("/.local/share/dikte"))
+        self.assertTrue(config_dir.as_posix().endswith("/.config/dikte"))
+        self.assertTrue(data_dir.as_posix().endswith("/.local/share/dikte"))
 
     def test_a_mac_keeps_both_in_application_support(self):
         config_dir, data_dir = paths.directories("darwin")
         self.assertEqual(config_dir, data_dir)
-        self.assertTrue(str(config_dir).endswith("/Library/Application Support/Dikte"))
+        self.assertTrue(config_dir.as_posix()
+                        .endswith("/Library/Application Support/Dikte"))
 
     def test_a_mac_does_not_read_the_xdg_variables(self):
         """A Mac with them set from some other tool still stores in one place."""
         with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": "/c"}):
             config_dir, _ = paths.directories("darwin")
-        self.assertNotIn("/c", str(config_dir))
+        self.assertNotIn("/c", config_dir.as_posix())
+
+    def test_windows_keeps_the_models_out_of_the_roaming_profile(self):
+        """Settings roam with the account; several gigabytes must not."""
+        with mock.patch.dict(os.environ, {"APPDATA": "C:/roam",
+                                          "LOCALAPPDATA": "C:/local"}):
+            config_dir, data_dir = paths.directories("win32")
+        self.assertEqual(config_dir.as_posix(), "C:/roam/Dikte")
+        self.assertEqual(data_dir.as_posix(), "C:/local/Dikte")
+
+    def test_windows_without_the_variables_set(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config_dir, data_dir = paths.directories("win32")
+        self.assertTrue(config_dir.as_posix().endswith("/AppData/Roaming/Dikte"))
+        self.assertTrue(data_dir.as_posix().endswith("/AppData/Local/Dikte"))
 
 
 class OnePlace(unittest.TestCase):

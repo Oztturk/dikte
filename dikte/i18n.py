@@ -43,10 +43,12 @@ _TR_CASES = {
     "dative": {
         "Claude": "Claude'a", "Codex": "Codex'e", "OpenRouter": "OpenRouter'a",
         "Google AI Studio": "Google AI Studio'ya", "Antigravity": "Antigravity'ye",
+        "OpenCode Go": "OpenCode Go'ya",
     },
     "accusative": {
         "Claude": "Claude'u", "Codex": "Codex'i", "OpenRouter": "OpenRouter'ı",
         "Google AI Studio": "Google AI Studio'yu", "Antigravity": "Antigravity'yi",
+        "OpenCode Go": "OpenCode Go'yu",
     },
 }
 
@@ -231,25 +233,27 @@ TR = {
     "gsk_… (falls back to GROQ_API_KEY)": "gsk_… (boşsa GROQ_API_KEY kullanılır)",
     "sk-or-… (falls back to OPENROUTER_API_KEY)": "sk-or-… (boşsa OPENROUTER_API_KEY kullanılır)",
     "(falls back to GEMINI_API_KEY)": "(boşsa GEMINI_API_KEY kullanılır)",
+    "(falls back to OPENCODE_API_KEY)": "(boşsa OPENCODE_API_KEY kullanılır)",
     "Test": "Test et",
     "Trying…": "Deneniyor…",
     "Runs on OpenRouter.": "OpenRouter üzerinde çalışır.",
     "Runs on Google AI Studio.": "Google AI Studio üzerinde çalışır.",
+    "Runs on OpenCode Go.": "OpenCode Go üzerinde çalışır.",
     "Connection works. {count} audio models visible.":
         "Bağlantı tamam. {count} ses modeli görünüyor.",
     "Connection works. {count} models visible.":
         "Bağlantı tamam. {count} model görünüyor.",
     "Clean the transcript with a model": "Transkripti bir modelle temizle",
-    "OpenRouter and Google AI Studio are the quick ones that need nothing "
-    "installed. llama.cpp runs here, on a model downloaded below. Claude Code, "
-    "Codex and Antigravity clean up on a subscription you already have, without "
-    "a second key, and take a few seconds longer because each opens a session "
-    "to do it.":
-        "OpenRouter ile Google AI Studio kurulum istemeyen hızlı seçeneklerdir. "
-        "llama.cpp burada, aşağıdan indirilen bir modelle çalışır. Claude Code, "
-        "Codex ve Antigravity temizliği hâlihazırda sahip olduğun bir abonelik "
-        "üzerinden, ikinci anahtar olmadan yapar; her biri bunun için bir oturum "
-        "açtığından birkaç saniye daha uzun sürer.",
+    "OpenRouter, Google AI Studio and OpenCode Go are the quick ones that need "
+    "nothing installed. llama.cpp runs here, on a model downloaded below. "
+    "Claude Code, Codex and Antigravity clean up on a subscription you already "
+    "have, without a second key, and take a few seconds longer because each "
+    "opens a session to do it.":
+        "OpenRouter, Google AI Studio ve OpenCode Go kurulum istemeyen hızlı "
+        "seçeneklerdir. llama.cpp burada, aşağıdan indirilen bir modelle "
+        "çalışır. Claude Code, Codex ve Antigravity temizliği hâlihazırda sahip "
+        "olduğun bir abonelik üzerinden, ikinci anahtar olmadan yapar; her biri "
+        "bunun için bir oturum açtığından birkaç saniye daha uzun sürer.",
     "{binary} is not on your PATH, so cleanup would fail and the raw transcript "
     "would be pasted. Install it, or pick another one above.":
         "{binary} PATH'te değil; temizleme başarısız olur ve ham transkript "
@@ -557,6 +561,17 @@ TR = {
         "Yukarıdaki çalışma dizini ve izinler burada bir şey ifade etmez.",
     "Needs no program installed, only the OpenRouter key.":
         "Kurulu bir programa değil, yalnızca OpenRouter anahtarına ihtiyaç duyar.",
+    "A plain question and a plain answer, over the OpenCode Go key you already "
+    "have. It runs no commands, opens no files and reaches none of your "
+    "services, so it can tell you what the capital of Peru is but not what is "
+    "in your calendar. Working directory and permissions above mean nothing "
+    "here.":
+        "Elindeki OpenCode Go anahtarı üzerinden düz bir soru ve düz bir cevap. "
+        "Komut çalıştırmaz, dosya açmaz, servislerinin hiçbirine erişmez; yani "
+        "Peru'nun başkentini söyler ama takviminde ne olduğunu söyleyemez. "
+        "Yukarıdaki çalışma dizini ve izinler burada bir şey ifade etmez.",
+    "Needs no program installed, only an OpenCode Go key.":
+        "Kurulu bir programa değil, yalnızca bir OpenCode Go anahtarına ihtiyaç duyar.",
     "Antigravity has neither a permission mode nor a sandbox to hand it, so "
     "what it may do without asking is whatever its own allow-rules say. The "
     "Permissions and Sandbox boxes above belong to the other two; the working "
@@ -825,16 +840,6 @@ TR = {
         "Düşünmeye eğitilmiş bir model, aksi söylenmedikçe düşünür; bir virgül "
         "için 300 token akıl yürütmek 300 token'lık bekleyiştir. Temizleme için "
         "doğrusu Kapalı.",
-    "OpenRouter is the quickest and the only one that needs nothing "
-    "installed. llama.cpp runs here, on a model downloaded below. Claude Code "
-    "and Codex clean up on the subscription you already have, without a "
-    "second key, and take a few seconds longer because each one opens a "
-    "session to do it.":
-        "OpenRouter en hızlısıdır ve kurulum istemeyen tek seçenektir. "
-        "llama.cpp burada, aşağıda indirilen bir modelle çalışır. Claude Code "
-        "ve Codex, ikinci bir anahtar olmadan zaten sahip olduğun abonelikle "
-        "temizler; her biri bunun için bir oturum açtığından birkaç saniye "
-        "daha sürer.",
     "whisper.cpp reaches the card through CUDA, ROCm or Vulkan when the build "
     "it is running was made with one. A build without any of them runs on the "
     "processor whatever this says.":

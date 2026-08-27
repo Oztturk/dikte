@@ -99,6 +99,7 @@ class Provider(DikteTest):
         self.assertEqual(assistant.executable("codex"), "codex")
         self.assertEqual(assistant.executable("agy"), "agy")
         self.assertEqual(assistant.executable("openrouter"), "")
+        self.assertEqual(assistant.executable("opencode"), "")
 
     def test_the_model_recorded_is_the_one_that_answered(self):
         """The history used to write Claude's setting whoever had answered."""
@@ -118,7 +119,8 @@ class Provider(DikteTest):
     def test_what_each_one_is_called(self):
         self.assertEqual(assistant.display_name(self.config()), "Claude")
         for name, called in (("codex", "Codex"), ("agy", "Antigravity"),
-                             ("openrouter", "OpenRouter")):
+                             ("openrouter", "OpenRouter"),
+                             ("opencode", "OpenCode Go")):
             with self.subTest(name=name):
                 self.assertEqual(
                     assistant.display_name(self.config(assistant_provider=name)),
@@ -732,6 +734,41 @@ class AskOpenRouter(DikteTest):
 
     def test_an_api_failure_reads_as_an_assistant_failure(self):
         conf = self.config(assistant_provider="openrouter")
+        with self.assertRaises(assistant.AssistantError):
+            assistant.ask("when is it", conf)
+
+
+class AskOpenCode(DikteTest):
+    def test_a_question_and_an_answer(self):
+        conf = self.config(assistant_provider="opencode",
+                           opencode_api_key="opencode-test-key")
+        with fake_urlopen({"choices": [{"message": {"content": "on Thursday"}}]}):
+            answer, warning = assistant.ask("when is it", conf)
+        self.assertEqual(answer, "on Thursday")
+        self.assertEqual(warning, "")
+
+    def test_the_conversation_is_ours_to_keep(self):
+        conf = self.config(assistant_provider="opencode",
+                           opencode_api_key="opencode-test-key")
+        with fake_urlopen({"choices": [{"message": {"content": "on Thursday"}}]}):
+            assistant.ask("when is it", conf)
+        stored = assistant.read_messages("opencode", 1800)
+        self.assertEqual([row["content"] for row in stored],
+                         ["when is it", "on Thursday"])
+
+    def test_the_model_and_endpoint_are_opencode_s_own(self):
+        conf = self.config(assistant_provider="opencode",
+                           opencode_api_key="opencode-test-key",
+                           assistant_opencode_model="glm-5.3")
+        with fake_urlopen({"choices": [{"message": {"content": "on Thursday"}}]}) as calls:
+            assistant.ask("when is it", conf)
+        sent = json.loads(calls[0].data.decode("utf-8"))
+        self.assertEqual(sent["model"], "glm-5.3")
+        self.assertIn("https://opencode.ai/zen/go/v1/chat/completions",
+                      calls[0].full_url)
+
+    def test_an_api_failure_reads_as_an_assistant_failure(self):
+        conf = self.config(assistant_provider="opencode")
         with self.assertRaises(assistant.AssistantError):
             assistant.ask("when is it", conf)
 

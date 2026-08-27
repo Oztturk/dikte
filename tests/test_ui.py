@@ -275,6 +275,7 @@ class Settings(DikteTest):
         """An OpenRouter id and a Claude alias are not the same field."""
         window = self.window(cfg.Config())
         boxes = {"openrouter": window.cleanup_model_row,
+                 "opencode": window.cleanup_opencode_model_row,
                  "claude": window.cleanup_claude_model,
                  "codex": window.cleanup_codex_model}
         for provider, box in boxes.items():
@@ -297,6 +298,42 @@ class Settings(DikteTest):
                 self.assertEqual(offered[1:], ["gpt-6", "gpt-6-mini"])
         self.assertEqual(window.cleanup_codex_model.currentText(),
                          "my-own-model")
+
+    def test_opencode_answering_refills_both_of_its_boxes(self):
+        """The fetched catalog replaces the built-in list in the cleanup and
+        agent boxes alike, and neither loses what was picked."""
+        conf = self.config(cleanup_opencode_model="my-own-model")
+        window = self.window(conf)
+        window._on_opencode_models_loaded(["glm-9", "kimi-k9"], "")
+        for combo in (window.cleanup_opencode_model,
+                      window.assistant_opencode_model):
+            with self.subTest(combo=combo.objectName() or "combo"):
+                offered = [combo.itemText(i) for i in range(combo.count())]
+                self.assertEqual(offered, ["glm-9", "kimi-k9"])
+        self.assertEqual(window.cleanup_opencode_model.currentText(),
+                         "my-own-model")
+
+    def test_opencode_s_list_arriving_at_open_leaves_the_other_boxes_alone(self):
+        conf = self.config(cleanup_opencode_model="my-own-model",
+                           meeting_model="some/meeting-model")
+        window = self.window(conf)
+        before = [window.meeting_model.itemText(i)
+                  for i in range(window.meeting_model.count())]
+        window._on_hosted_models_loaded("opencode", ["glm-5.3", "kimi-k3"])
+        combo = window.cleanup_opencode_model
+        offered = [combo.itemText(i) for i in range(combo.count())]
+        self.assertEqual(offered, ["glm-5.3", "kimi-k3"])
+        self.assertEqual(combo.currentText(), "my-own-model")
+        self.assertEqual([window.meeting_model.itemText(i)
+                          for i in range(window.meeting_model.count())], before)
+
+    def test_opencode_cleanup_offers_a_fetch_button_of_its_own(self):
+        """The OpenRouter button leaves the screen with its box, so OpenCode Go
+        carries its own."""
+        window = self.window(cfg.Config())
+        window._select_data(window.cleanup_provider, "opencode")
+        self.assertFalse(window.cleanup_opencode_model_row.isHidden())
+        self.assertTrue(window.cleanup_model_row.isHidden())
 
     def test_agy_answering_refills_both_of_its_boxes(self):
         """The same arrangement as Codex: both boxes, nothing chosen is lost."""
@@ -340,10 +377,11 @@ class Settings(DikteTest):
 
     def test_a_key_on_file_is_fetched_with_at_open(self):
         window = self.window(self.config(openrouter_api_key="sk-or-x",
-                                         gemini_api_key="AIza-x"))
+                                         gemini_api_key="AIza-x",
+                                         opencode_api_key="opencode-x"))
         with mock.patch.object(settings_ui.threading, "Thread") as thread:
             REAL_LOAD_HOSTED_MODELS(window)
-        self.assertEqual(thread.call_count, 2)
+        self.assertEqual(thread.call_count, 3)
 
     def test_the_update_line_names_the_version_that_is_running(self):
         window = self.window(cfg.Config())

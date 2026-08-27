@@ -116,11 +116,12 @@ Speech to text and cleanup each pick a provider in the settings window, and both
 run here by default, on models of your own. The cloud is the other option:
 speech to text on **OpenAI**, **Groq** or **OpenRouter** (`gpt-4o-transcribe`),
 cleanup on OpenRouter (`google/gemini-3.5-flash-lite`), on **Google AI Studio**
-(`gemini-3.5-flash-lite`) or, when one of them is installed, on Claude Code,
-Codex or Antigravity. The first two are a single HTTP request; the three CLIs
-each open a whole session to do it, which is where their few extra seconds go.
-The keys fall back to `OPENAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`
-and `GEMINI_API_KEY`, and are stored in
+(`gemini-3.5-flash-lite`), on **OpenCode Go** (`deepseek-v4-flash`) or, when one
+of them is installed, on Claude Code, Codex or Antigravity. The first three are
+a single HTTP request; the three CLIs each open a whole session to do it, which
+is where their few extra seconds go. The keys fall back to `OPENAI_API_KEY`,
+`GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` and `OPENCODE_API_KEY`,
+and are stored in
 `~/.config/dikte/config.json`, mode 600, or in
 `~/Library/Application Support/Dikte` on a Mac. Cleanup can be switched off, in
 which case the raw transcript is pasted, and a thinking model's effort can be
@@ -195,10 +196,10 @@ running.
   a thing you can say to a window that is not Claude. Codex (`codex exec`) and
   Antigravity (`agy -p`) run the same way, though Antigravity takes neither a
   permission mode nor a sandbox from Dikte: what it may do without asking is
-  whatever its own allow-rules say. OpenRouter is there as a plain
-  question-and-answer fallback for a machine with no CLI on it. Provider, model,
-  permissions and working directory are under Settings → Agent, and commands
-  close together stay in one conversation.
+  whatever its own allow-rules say. OpenRouter or OpenCode Go is there as a
+  plain question-and-answer fallback for a machine with no CLI on it. Provider,
+  model, permissions and working directory are under Settings → Agent, and
+  commands close together stay in one conversation.
 - **Meetings** are recorded from the microphone and the speaker output at the
   same time, which settles who said what by the channel a voice arrived on
   instead of guessing at it. The two sides are transcribed separately and
@@ -245,7 +246,7 @@ cli.py            the command line: every verb, and what it answers with
 ipc.py            one request and one reply over the local socket
 audio.py          PCM capture: pw-record for dictation, ffmpeg for a meeting
 meeting.py        channel split, speaker labelling, cleanup, minutes
-assistant.py      handing a dictation to Claude Code, Codex, agy or OpenRouter
+assistant.py      handing a dictation to Claude Code, Codex, agy or a chat model
 api.py            transcription and cleanup requests (stdlib only)
 cleanup.py        who rewrites the transcript: a hosted model, one here, a CLI
 ggml.py           whisper.cpp and llama.cpp here: fetch, verify, keep serving

@@ -1,17 +1,18 @@
 """Handing a dictation to an agent as a command, and pasting back its answer.
 
-Four of them, because not everyone has the same one installed:
+Five of them, because not everyone has the same one installed:
 
   Claude Code   `claude -p`, the session you would have opened yourself
   Codex         `codex exec`, the same idea from the other shop
   Antigravity   `agy -p`, Google's, with a browser of its own attached
   OpenRouter    a plain chat request, over the key that is already configured
+  OpenCode Go   a plain chat request, over a subscription to open coding models
 
 The first three are the whole machine: they run commands, read files, and reach
 whatever skills and services you have connected, which is what makes "put that
-in my calendar on Thursday" a thing you can say. OpenRouter cannot touch any of
-that, and is there so that a question still gets an answer on a machine with no
-CLI installed at all.
+in my calendar on Thursday" a thing you can say. The two chat requests cannot
+touch any of that, and are there so that a question still gets an answer on a
+machine with no CLI installed at all.
 
 What each of the three is allowed to do without asking is settled where that
 program keeps its own permissions, not here. Dikte hands Claude Code the mode
@@ -44,16 +45,16 @@ from . import paths
 from .i18n import t
 
 SESSION_FILE = cfg.DATA_DIR / "assistant.json"
-PROVIDERS = ("claude", "codex", "agy", "openrouter")
+PROVIDERS = ("claude", "codex", "agy", "openrouter", "opencode")
 
 # What each one is called where a person reads it: the tray, the corner of
 # the screen, and the line an error is written in.
 SERVICES = {"claude": "Claude", "codex": "Codex", "agy": "Antigravity",
-            "openrouter": "OpenRouter"}
+            "openrouter": "OpenRouter", "opencode": "OpenCode Go"}
 
-# How many messages of an OpenRouter conversation are carried forward. The two
-# CLIs keep their own history and need no such number; here every turn is resent
-# in full, so the window has to end somewhere.
+# How many messages of a chat provider's conversation are carried forward. The
+# two CLIs keep their own history and need no such number; here every turn is
+# resent in full, so the window has to end somewhere.
 MAX_HISTORY = 24
 
 # What to say in the indicator for a tool, keyed by the name the CLI uses.
@@ -158,6 +159,8 @@ def model(conf):
         return conf["assistant_agy_model"].strip() or "agy"
     if name == "openrouter":
         return conf["assistant_openrouter_model"]
+    if name == "opencode":
+        return conf["assistant_opencode_model"]
     return conf["assistant_model"]
 
 
@@ -253,8 +256,8 @@ def ask(prompt, conf, on_stage=None, should_stop=None):
     one, and only the denial explains why it did not do what it was asked to.
     """
     name = provider(conf)
-    if name == "openrouter":
-        return _ask_openrouter(prompt, conf, on_stage)
+    if name in ("openrouter", "opencode"):
+        return _ask_chat(name, SERVICES[name], prompt, conf, on_stage)
 
     binary = executable(name)
     if not shutil.which(binary):
@@ -513,29 +516,34 @@ def agy_models():
     return ids
 
 
-# --- OpenRouter -----------------------------------------------------------
+# --- OpenRouter and OpenCode Go -------------------------------------------
 
-def _ask_openrouter(prompt, conf, on_stage):
-    """No tools, no files, no calendar: a question and an answer.
+def _ask_chat(name, service, prompt, conf, on_stage):
+    """A plain question and answer, over a chat provider's key.
 
-    It is the fallback for a machine with neither CLI on it, so it says what it
-    knows and nothing else. The conversation is ours to keep here, since there
-    is no session on the other end to resume.
+    No tools, no files, no calendar. It is the fallback for a machine with
+    neither CLI on it, so it says what it knows and nothing else. The
+    conversation is ours to keep here, since there is no session on the other
+    end to resume.
     """
     if on_stage:
         on_stage(t("Thinking…"))
-    history = read_messages("openrouter", conf["assistant_session_minutes"] * 60)
+    history = read_messages(name, conf["assistant_session_minutes"] * 60)
     messages = history + [{"role": "user", "content": prompt}]
+    model = (conf["assistant_openrouter_model"] if name == "openrouter"
+             else conf["assistant_opencode_model"])
+    base_url = (conf["openrouter_base_url"] if name == "openrouter"
+                else conf["opencode_base_url"])
+    key = conf.openrouter_key() if name == "openrouter" else conf.opencode_key()
     try:
         answer = api.chat(
-            messages, conf.openrouter_key(), conf["assistant_openrouter_model"],
-            conf.assistant_prompt(), reasoning=conf["assistant_reasoning"],
-            base_url=conf["openrouter_base_url"],
-            timeout=conf["assistant_timeout"],
+            messages, key, model, conf.assistant_prompt(),
+            reasoning=conf["assistant_reasoning"], base_url=base_url,
+            timeout=conf["assistant_timeout"], provider=name, service=service,
         )
     except api.ApiError as exc:
         raise AssistantError(str(exc)) from exc
-    write_session("openrouter",
+    write_session(name,
                   messages=messages + [{"role": "assistant", "content": answer}])
     return answer, ""
 

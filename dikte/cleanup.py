@@ -29,7 +29,7 @@ from . import ggml
 from . import paths
 from .i18n import t
 
-PROVIDERS = ("openrouter", "gemini", "local", "claude", "codex", "agy")
+PROVIDERS = ("openrouter", "gemini", "opencode", "local", "claude", "codex", "agy")
 
 
 class CleanupError(api.ApiError):
@@ -67,6 +67,8 @@ def model(conf):
         return conf["cleanup_agy_model"].strip() or "agy"
     if name == "gemini":
         return conf["cleanup_gemini_model"]
+    if name == "opencode":
+        return conf["cleanup_opencode_model"]
     return conf["cleanup_model"]
 
 
@@ -90,6 +92,13 @@ def run(text, conf, system_prompt, timeout=180, aborter=None):
             reasoning=conf["cleanup_reasoning"],
             base_url=conf["gemini_base_url"], timeout=timeout,
             provider="gemini", service="Google AI Studio", aborter=aborter,
+        )
+    if name == "opencode":
+        return api.cleanup(
+            text, conf.opencode_key(), conf["cleanup_opencode_model"], system_prompt,
+            reasoning=conf["cleanup_reasoning"],
+            base_url=conf["opencode_base_url"], timeout=timeout,
+            provider="opencode", service="OpenCode Go", aborter=aborter,
         )
     if name == "local":
         return _local(text, conf, system_prompt, timeout, aborter)

@@ -189,6 +189,8 @@ class Keys(DikteTest):
             self.assertEqual(cfg.Config().groq_key(), "gsk-env")
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "AIza-env"}):
             self.assertEqual(cfg.Config().gemini_key(), "AIza-env")
+        with mock.patch.dict(os.environ, {"OPENCODE_API_KEY": "opencode-env"}):
+            self.assertEqual(cfg.Config().opencode_key(), "opencode-env")
 
 
 class TranscribeTarget(DikteTest):
@@ -577,11 +579,18 @@ class Defaults(unittest.TestCase):
         self.assertEqual(cfg.DEFAULTS["openai_api_key"], "")
         self.assertEqual(cfg.DEFAULTS["openrouter_api_key"], "")
         self.assertEqual(cfg.DEFAULTS["gemini_api_key"], "")
+        self.assertEqual(cfg.DEFAULTS["opencode_api_key"], "")
 
     def test_google_ai_studio_is_a_cleanup_provider_and_not_a_transcriber(self):
         """Its compatible endpoint has no /audio/transcriptions behind it."""
         self.assertNotIn("gemini", cfg.TRANSCRIBERS)
         self.assertIn("gemini", cleanup.PROVIDERS)
+
+    def test_opencode_ships_on_its_own_endpoint(self):
+        self.assertEqual(cfg.DEFAULTS["opencode_base_url"],
+                         "https://opencode.ai/zen/go/v1")
+        self.assertEqual(cfg.DEFAULTS["cleanup_opencode_model"], "deepseek-v4-flash")
+        self.assertEqual(cfg.DEFAULTS["assistant_opencode_model"], "deepseek-v4-flash")
 
     def test_every_language_specific_prompt_has_both_languages(self):
         for name in ("CLEANUP_PROMPT", "FILE_CLEANUP_PROMPT", "MEETING_PROMPT",

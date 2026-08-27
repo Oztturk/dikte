@@ -76,8 +76,8 @@ AGY_MODELS = [
 # agent can run on open a whole session to do the smaller job.
 CLEANUP_PROVIDERS = [
     ("OpenRouter", "openrouter"), ("Google AI Studio", "gemini"),
-    ("This machine (llama.cpp)", "local"), ("Claude Code", "claude"),
-    ("Codex", "codex"), ("Antigravity", "agy"),
+    ("OpenCode Go", "opencode"), ("This machine (llama.cpp)", "local"),
+    ("Claude Code", "claude"), ("Codex", "codex"), ("Antigravity", "agy"),
 ]
 # Cleaning up a sentence is the lightest thing either of them will ever be
 # asked, so the small model comes first.
@@ -90,7 +90,7 @@ MEETING_MODELS = [
 ]
 ASSISTANT_PROVIDERS = [
     ("Claude Code", "claude"), ("Codex", "codex"), ("Antigravity", "agy"),
-    ("OpenRouter", "openrouter"),
+    ("OpenRouter", "openrouter"), ("OpenCode Go", "opencode"),
 ]
 # Aliases resolve to the newest model of that name, so they age better than an
 # id does; a full id can be typed in when a particular one is wanted.
@@ -104,6 +104,13 @@ CODEX_MODELS = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 ASSISTANT_OR_MODELS = [
     "google/gemini-3.5-flash", "anthropic/claude-sonnet-5", "openai/gpt-5.4",
     "x-ai/grok-4.5", "google/gemini-3.1-pro-preview",
+]
+# A starting set of the models OpenCode Go serves over /chat/completions; the
+# Fetch button asks the endpoint itself for the full catalog of the day.
+OPENCODE_MODELS = [
+    "deepseek-v4-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.2", "glm-5.1",
+    "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "longcat-2.0",
+    "mimo-v2.5", "mimo-v2.5-pro", "hy3",
 ]
 # What Claude Code may do without being able to ask. It cannot ask: there is no
 # window to answer in, so a mode that would have prompted denies instead.
@@ -572,6 +579,7 @@ class SettingsWindow(QDialog):
 
     _models_loaded = pyqtSignal(list, str)
     _gemini_models_loaded = pyqtSignal(list, str)
+    _opencode_models_loaded = pyqtSignal(list, str)
     _transcribe_models_loaded = pyqtSignal(list, str)
     _codex_models_loaded = pyqtSignal(list)
     _agy_models_loaded = pyqtSignal(list)
@@ -638,6 +646,7 @@ class SettingsWindow(QDialog):
         self._gemini_models_loaded.connect(self._on_gemini_models_loaded)
         self._transcribe_models_loaded.connect(self._on_transcribe_models_loaded)
         self._codex_models_loaded.connect(self._on_codex_models_loaded)
+        self._opencode_models_loaded.connect(self._on_opencode_models_loaded)
         self._agy_models_loaded.connect(self._on_agy_models_loaded)
         self._hosted_models_loaded.connect(self._on_hosted_models_loaded)
         self._test_done.connect(self._on_test_done)
@@ -832,6 +841,9 @@ class SettingsWindow(QDialog):
         self.gemini_key = self._key_row(
             keys_form, "gemini", t("(falls back to GEMINI_API_KEY)"),
             self._test_gemini, service="Google AI Studio")
+        self.opencode_key = self._key_row(
+            keys_form, "opencode", t("(falls back to OPENCODE_API_KEY)"),
+            self._test_opencode, service="OpenCode Go")
         outer.addWidget(keys)
 
         stt = QGroupBox(t("Speech to text"))
@@ -904,11 +916,11 @@ class SettingsWindow(QDialog):
         for label, value in CLEANUP_PROVIDERS:
             self.cleanup_provider.addItem(t(label), value)
         self.cleanup_provider.setToolTip(t(
-            "OpenRouter and Google AI Studio are the quick ones that need nothing "
-            "installed. llama.cpp runs here, on a model downloaded below. Claude "
-            "Code, Codex and Antigravity clean up on a subscription you already "
-            "have, without a second key, and take a few seconds longer because "
-            "each opens a session to do it."
+            "OpenRouter, Google AI Studio and OpenCode Go are the quick ones "
+            "that need nothing installed. llama.cpp runs here, on a model "
+            "downloaded below. Claude Code, Codex and Antigravity clean up on "
+            "a subscription you already have, without a second key, and take a "
+            "few seconds longer because each opens a session to do it."
         ))
         self.cleanup_provider.currentIndexChanged.connect(self._cleanup_provider_changed)
         orr_form.addRow(t("Runs on"), self.cleanup_provider)
@@ -944,6 +956,16 @@ class SettingsWindow(QDialog):
         self.cleanup_codex_model.addItems([t("Codex's own default")] + CODEX_MODELS)
         self.cleanup_codex_model.setToolTip(_typed_model_note("Codex"))
         orr_form.addRow(t("Model"), self.cleanup_codex_model)
+
+        self.cleanup_opencode_model = QComboBox()
+        self.cleanup_opencode_model.setEditable(True)
+        self.cleanup_opencode_model.addItems(OPENCODE_MODELS)
+        self.cleanup_opencode_model.setToolTip(_typed_model_note("OpenCode Go"))
+        self.refresh_opencode_models = QPushButton(t("Fetch model list"))
+        self.refresh_opencode_models.clicked.connect(self._load_opencode_models)
+        self.cleanup_opencode_model_row = self._row(self.cleanup_opencode_model,
+                                                    self.refresh_opencode_models)
+        orr_form.addRow(t("Model"), self.cleanup_opencode_model_row)
 
         self.cleanup_agy_model = QComboBox()
         self.cleanup_agy_model.setEditable(True)
@@ -1164,6 +1186,23 @@ class SettingsWindow(QDialog):
         agy_note.setWordWrap(True)
         agy_form.addRow(agy_note)
         layout.addWidget(self.agy_box)
+
+        self.opencode_box = QGroupBox("OpenCode Go")
+        og_form = QFormLayout(self.opencode_box)
+        self.assistant_opencode_model = QComboBox()
+        self.assistant_opencode_model.setEditable(True)
+        self.assistant_opencode_model.addItems(OPENCODE_MODELS)
+        og_form.addRow(t("Model"), self.assistant_opencode_model)
+        og_note = QLabel(t(
+            "A plain question and a plain answer, over the OpenCode Go key you "
+            "already have. It runs no commands, opens no files and reaches none "
+            "of your services, so it can tell you what the capital of Peru is "
+            "but not what is in your calendar. Working directory and permissions "
+            "above mean nothing here."
+        ))
+        og_note.setWordWrap(True)
+        og_form.addRow(og_note)
+        layout.addWidget(self.opencode_box)
 
         thread = QGroupBox(t("The conversation"))
         thread_form = QFormLayout(thread)
@@ -1730,6 +1769,7 @@ class SettingsWindow(QDialog):
             self._key_fields[name].setText(conf[who.key])
             self._models[name] = conf[who.model]
         self.gemini_key.setText(conf["gemini_api_key"])
+        self.opencode_key.setText(conf["opencode_api_key"])
         self._shown_provider = ""
         self._select_data(self.transcribe_provider, conf["transcribe_provider"])
         self._provider_changed()  # selecting index 0 fires no signal
@@ -1750,6 +1790,7 @@ class SettingsWindow(QDialog):
         self.cleanup_agy_model.setCurrentText(
             conf["cleanup_agy_model"] or t("Antigravity's own default")
         )
+        self.cleanup_opencode_model.setCurrentText(conf["cleanup_opencode_model"])
         self._select_data(self.cleanup_provider, conf["cleanup_provider"])
         self._cleanup_provider_changed()  # selecting index 0 fires no signal
         self._select_data(self.cleanup_reasoning, conf["cleanup_reasoning"])
@@ -1781,6 +1822,7 @@ class SettingsWindow(QDialog):
         self._select_data(self.assistant_codex_sandbox, conf["assistant_codex_sandbox"])
         self.assistant_openrouter_model.setCurrentText(conf["assistant_openrouter_model"])
         self.assistant_agy_model.setCurrentText(conf["assistant_agy_model"])
+        self.assistant_opencode_model.setCurrentText(conf["assistant_opencode_model"])
         self._assistant_provider_changed()  # selecting index 0 fires no signal
         self._select_data(self.assistant_reasoning, conf["assistant_reasoning"])
         self.assistant_dir.setText(conf["assistant_dir"])
@@ -1849,6 +1891,7 @@ class SettingsWindow(QDialog):
             conf[who.key] = self._key_fields[name].text().strip()
             conf[who.model] = self._models[name].strip() or cfg.DEFAULTS[who.model]
         conf["gemini_api_key"] = self.gemini_key.text().strip()
+        conf["opencode_api_key"] = self.opencode_key.text().strip()
         conf["local_model"] = self.local_whisper.selected()
         conf["local_gpu"] = self.local_gpu.isChecked()
         conf["local_preload"] = self.local_preload.isChecked()
@@ -1871,6 +1914,10 @@ class SettingsWindow(QDialog):
         conf["cleanup_agy_model"] = (
             "" if agy_cleanup_model == t("Antigravity's own default")
             else agy_cleanup_model
+        )
+        conf["cleanup_opencode_model"] = (
+            self.cleanup_opencode_model.currentText().strip()
+            or cfg.DEFAULTS["cleanup_opencode_model"]
         )
         conf["cleanup_reasoning"] = self.cleanup_reasoning.currentData() or ""
         conf["local_llm_model"] = self.local_llm.selected()
@@ -1913,6 +1960,10 @@ class SettingsWindow(QDialog):
         agy_model = self.assistant_agy_model.currentText().strip()
         conf["assistant_agy_model"] = (
             "" if agy_model == t("Antigravity's own default") else agy_model
+        )
+        conf["assistant_opencode_model"] = (
+            self.assistant_opencode_model.currentText().strip()
+            or cfg.DEFAULTS["assistant_opencode_model"]
         )
         conf["assistant_reasoning"] = self.assistant_reasoning.currentData() or ""
         conf["assistant_dir"] = self.assistant_dir.text().strip()
@@ -2128,6 +2179,37 @@ class SettingsWindow(QDialog):
                 combo.addItem(name, name)
             combo.setCurrentText(current)
 
+    def _load_opencode_models(self):
+        self.refresh_opencode_models.setEnabled(False)
+        self.models_label.setText(t("Fetching model list…"))
+        key, base = self._typed_key("opencode")
+
+        def work():
+            try:
+                self._opencode_models_loaded.emit(
+                    api.openai_models(key, base, "OpenCode Go"), "")
+            except api.ApiError as exc:
+                self._opencode_models_loaded.emit([], str(exc))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_opencode_models_loaded(self, models, error):
+        self.refresh_opencode_models.setEnabled(True)
+        if error:
+            self.models_label.setText(t("Could not fetch the list: {error}", error=error))
+            return
+        self._fill_opencode_boxes(models)
+        self.models_label.setText(t("{count} models loaded.", count=len(models)))
+
+    def _fill_opencode_boxes(self, models):
+        # The agent runs on the same key and catalog, so its box is refilled
+        # from the same list.
+        for combo in (self.cleanup_opencode_model, self.assistant_opencode_model):
+            current = combo.currentText()
+            combo.clear()
+            combo.addItems(models)
+            combo.setCurrentText(current)
+
     def _load_agy_models(self):
         """Ask Antigravity which models it offers, off the interface thread.
 
@@ -2157,7 +2239,7 @@ class SettingsWindow(QDialog):
             combo.setCurrentText(current)
 
     def _load_hosted_models(self):
-        """Fetch OpenRouter's and Google's lists at open, without being asked.
+        """Fetch the hosted model lists at open, without being asked.
 
         The Fetch buttons stay: they are the retry, and the place a failure is
         worth explaining. Here nobody asked, so an error changes nothing on
@@ -2174,6 +2256,12 @@ class SettingsWindow(QDialog):
         if gemini_key:
             jobs.append(("gemini",
                          lambda: api.gemini_models(gemini_key, gemini_base)))
+        opencode_key = self.conf.opencode_key()
+        opencode_base = self.conf["opencode_base_url"]
+        if opencode_key:
+            jobs.append(("opencode",
+                         lambda: api.openai_models(opencode_key, opencode_base,
+                                                   "OpenCode Go")))
         for provider, fetch in jobs:
             def work(provider=provider, fetch=fetch):
                 try:
@@ -2186,6 +2274,9 @@ class SettingsWindow(QDialog):
             threading.Thread(target=work, daemon=True).start()
 
     def _on_hosted_models_loaded(self, provider, models):
+        if provider == "opencode":
+            self._fill_opencode_boxes(models)
+            return
         combos = ((self.cleanup_model, self.meeting_model)
                   if provider == "openrouter" else (self.cleanup_gemini_model,))
         for combo in combos:
@@ -2217,6 +2308,13 @@ class SettingsWindow(QDialog):
         self._test_key("gemini", lambda: t(
             "Connection works. {count} models visible.",
             count=len(api.gemini_models(key, base)),
+        ))
+
+    def _test_opencode(self):
+        key, base = self._typed_key("opencode")
+        self._test_key("opencode", lambda: t(
+            "Connection works. {count} models visible.",
+            count=len(api.openai_models(key, base, "OpenCode Go")),
         ))
 
     def _typed_key(self, provider):
@@ -2458,6 +2556,8 @@ class SettingsWindow(QDialog):
                                         provider == "claude")
         self.cleanup_form.setRowVisible(self.cleanup_codex_model,
                                         provider == "codex")
+        self.cleanup_form.setRowVisible(self.cleanup_opencode_model_row,
+                                        provider == "opencode")
         self.cleanup_form.setRowVisible(self.cleanup_agy_model,
                                         provider == "agy")
         self.cleanup_form.setRowVisible(self.cleanup_reasoning,
@@ -2470,6 +2570,8 @@ class SettingsWindow(QDialog):
             self.models_label.setText(t("Runs on this machine, on llama.cpp."))
         elif provider == "gemini":
             self.models_label.setText(t("Runs on Google AI Studio."))
+        elif provider == "opencode":
+            self.models_label.setText(t("Runs on OpenCode Go."))
         elif not binary:
             self.models_label.setText(t("Runs on OpenRouter."))
         elif found:
@@ -2487,6 +2589,7 @@ class SettingsWindow(QDialog):
         self.codex_box.setVisible(provider == "codex")
         self.openrouter_box.setVisible(provider == "openrouter")
         self.agy_box.setVisible(provider == "agy")
+        self.opencode_box.setVisible(provider == "opencode")
         self._refresh_assistant_status()
 
     def _refresh_assistant_status(self):
@@ -2494,9 +2597,14 @@ class SettingsWindow(QDialog):
         binary = assistant.executable(provider)
         found = shutil.which(binary) if binary else ""
         if not binary:
-            self.assistant_found.setText(
-                t("Needs no program installed, only the OpenRouter key.")
-            )
+            if provider == "opencode":
+                self.assistant_found.setText(
+                    t("Needs no program installed, only an OpenCode Go key.")
+                )
+            else:
+                self.assistant_found.setText(
+                    t("Needs no program installed, only the OpenRouter key.")
+                )
         elif found:
             self.assistant_found.setText(t("Found: {path}", path=found))
         else:

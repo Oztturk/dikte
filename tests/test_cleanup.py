@@ -60,6 +60,7 @@ class Provider(DikteTest):
         self.assertEqual(cleanup.executable("agy"), "agy")
         self.assertEqual(cleanup.executable("openrouter"), "")
         self.assertEqual(cleanup.executable("gemini"), "")
+        self.assertEqual(cleanup.executable("opencode"), "")
 
     def test_the_model_named_in_the_history_is_the_one_that_did_it(self):
         self.assertEqual(cleanup.model(self.config(cleanup_model="some/model")),
@@ -85,6 +86,9 @@ class Provider(DikteTest):
             cleanup.model(self.config(cleanup_provider="agy",
                                       cleanup_agy_model="gemini-3.7-flash-low")),
             "gemini-3.7-flash-low")
+        self.assertEqual(
+            cleanup.model(self.config(cleanup_provider="opencode",
+                                      cleanup_opencode_model="glm-5.3")), "glm-5.3")
 
 
 class OpenRouter(DikteTest):
@@ -100,6 +104,32 @@ class OpenRouter(DikteTest):
 
     def test_no_cli_is_started_for_it(self):
         conf = self.config(openrouter_api_key="sk-or-test")
+        patcher, calls = fake_cli(stdout="never")
+        with patcher, mock.patch.object(api, "cleanup", return_value="Done."):
+            cleanup.run("uh, done", conf, "the rules")
+        self.assertEqual(calls, [])
+
+
+class OpenCode(DikteTest):
+    def test_it_is_one_request_with_the_settings_as_they_were(self):
+        conf = self.config(cleanup_provider="opencode",
+                           opencode_api_key="opencode-test-key",
+                           cleanup_opencode_model="some/model",
+                           cleanup_reasoning="low")
+        with mock.patch.object(api, "cleanup", return_value="Done.") as call:
+            self.assertEqual(cleanup.run("uh, done", conf, "the rules"), "Done.")
+        text, key, model, prompt = call.call_args.args
+        self.assertEqual((text, key, model, prompt),
+                         ("uh, done", "opencode-test-key", "some/model", "the rules"))
+        self.assertEqual(call.call_args.kwargs["reasoning"], "low")
+        self.assertEqual(call.call_args.kwargs["provider"], "opencode")
+        self.assertEqual(call.call_args.kwargs["service"], "OpenCode Go")
+        self.assertEqual(call.call_args.kwargs["base_url"],
+                         "https://opencode.ai/zen/go/v1")
+
+    def test_no_cli_is_started_for_it(self):
+        conf = self.config(cleanup_provider="opencode",
+                           opencode_api_key="opencode-test-key")
         patcher, calls = fake_cli(stdout="never")
         with patcher, mock.patch.object(api, "cleanup", return_value="Done."):
             cleanup.run("uh, done", conf, "the rules")

@@ -104,7 +104,9 @@ toplantı kaydı henüz yok, ayrıntılar [Windows README](README.windows.md)'si
 başlatmayı ve iki global kısayolu kurar; tuşları iki argümanı, argüman
 verilmezse ayarlarında duranlar. `./scripts/update.sh` son sürümü çeker ve
 bunları yerine koyar; `./scripts/uninstall.sh` hepsini geri alır, `--purge`
-demedikçe ayarlarına ve diktelerine dokunmaz.
+demedikçe ayarlarına ve diktelerine dokunmaz. Dikte sürüm sayfasına günde bir
+kez bakar ve yeni sürüm çıkmışsa tepsi menüsüne bir satır koyar; o satır bir şey
+kurmaz, sayfayı açar. Genel sekmesi bu denetimi kapatır ya da anında çalıştırır.
 
 Sesi yazıya çevirme ve temizleme, ayarlar penceresinde ayrı ayrı sağlayıcı
 seçer; ikisi de varsayılan olarak burada, kendi modellerinle çalışır. Bulutu
@@ -127,6 +129,7 @@ yanındaki kutudan düşünme seviyesini de seçebilirsin.
 | Ajana sesle komut ver | Tepsi menüsü → *Claude'a sor*, ya da `dikte ask` |
 | Toplantıyı başlat / bitir | Tepsi menüsü → *Toplantı kaydet*, ya da `dikte meeting` |
 | Ayarlar | Tepsi menüsü → *Ayarlar*, ya da `dikte settings` |
+| Yeni sürüm var mı bak | Genel sekmesi → *Şimdi bak*, ya da `dikte update` |
 | Güncelleme sonrası yeniden yükle | Tepsi menüsü → *Yeniden başlat*, ya da `dikte restart` |
 | Çık | Tepsi menüsü → *Çık*, ya da `dikte quit` |
 
@@ -234,6 +237,7 @@ api.py            transkript ve temizleme istekleri (yalnız stdlib)
 cleanup.py        transkripti kim temizler: OpenRouter, burası, Claude ya da Codex
 ggml.py           whisper.cpp ve llama.cpp'yi indirip burada çalıştırma
 hub.py            GitHub ve Hugging Face'te bugün ne olduğu
+update.py         yeni sürüm çıkmış mı, çıkmışsa hangi sayfada
 worker.py         transkript → temizleme → pano → yapıştırma
 vad.py            kayıtta gerçekten konuşma var mı kararı
 filetranscribe.py dosyadan transkript: ffmpeg, parçalama, zaman damgaları

@@ -134,6 +134,22 @@ def release(repo, tag="latest", refresh=False):
     return data.get("tag_name") or tag, assets
 
 
+def newest_release(repo, refresh=False):
+    """(tag, page, published) for the newest release of a repository.
+
+    release() above is for taking a file out of one and insists on there being
+    files to take; this is for the number, which a release with nothing
+    attached answers just as well. GitHub keeps prereleases out of "latest" on
+    its own, which is what leaves the nightly build off this answer.
+    """
+    data = _fetch(f"gh-newest-{repo}",
+                  f"{GITHUB_API}/repos/{repo}/releases/latest", refresh=refresh)
+    if not isinstance(data, dict) or not data.get("tag_name"):
+        raise HubError(t("{repo} has published no release.", repo=repo))
+    return (data["tag_name"], data.get("html_url") or "",
+            data.get("published_at") or "")
+
+
 def files(repo, revision="main", refresh=False):
     """[Item] for every file in a Hugging Face repository.
 

@@ -459,6 +459,9 @@ DEFAULTS = {
     "overlay_corner": "bottom-left",
     "keep_audio": False,
     "history_limit": 200,
+    # A look at the releases page once a day, and nothing more than a look:
+    # what is found opens a browser, never an installer.
+    "update_check": True,
     "file_timestamps": False,
     "file_cleanup": True,
     "file_cleanup_prompt": "",      # empty -> language-specific default

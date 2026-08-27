@@ -34,8 +34,9 @@ if sys.platform == "darwin":
                           os.environ.get("PATH", "")) if part
     )
 
-from PyQt6.QtCore import QTimer, QElapsedTimer, QSocketNotifier  # noqa: E402
-from PyQt6.QtGui import QAction, QIcon  # noqa: E402
+from PyQt6.QtCore import (QObject, QTimer, QElapsedTimer, QSocketNotifier,  # noqa: E402
+                          QUrl, pyqtSignal)
+from PyQt6.QtGui import QAction, QDesktopServices, QIcon  # noqa: E402
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMenu, QSystemTrayIcon  # noqa: E402
 
@@ -45,11 +46,14 @@ from . import cli  # noqa: E402
 from . import config as cfg  # noqa: E402
 from . import ggml  # noqa: E402
 from . import hotkey  # noqa: E402
+from . import hub  # noqa: E402
 from . import i18n  # noqa: E402
 from . import integrate  # noqa: E402
 from . import ipc  # noqa: E402
+from . import mac_window  # noqa: E402
 from . import meeting  # noqa: E402
 from . import trayicon  # noqa: E402
+from . import update  # noqa: E402
 from .i18n import t  # noqa: E402
 from .meeting import MeetingPipeline  # noqa: E402
 from .overlay import Overlay  # noqa: E402
@@ -77,6 +81,37 @@ ECHO_MS = 2000
 # both halves of the waveform move, which is the one check that matters, and
 # short enough not to sit in the corner for the rest of the hour.
 PEEK_MS = 12000
+
+# When the releases page is looked at, and how often it is thought about after
+# that. The delay is there so that a check never shares the first seconds of a
+# start with the model being loaded and the desktop drawing the tray; the
+# interval is not the interval between checks, which update.py holds at a day,
+# but how often that clock is read, so that a machine left running for a week
+# still asks once a day rather than once a boot.
+UPDATE_DELAY_MS = 20000
+UPDATE_POLL_MS = 3 * 3600 * 1000
+
+
+class UpdateCheck(QObject):
+    """One look at the releases page, off the interface thread.
+
+    An object of its own because the application is not one: a plain thread
+    cannot touch a widget, and a signal is the only way back onto the thread
+    that may.
+    """
+
+    # The newer release, or None when there is nothing to say, and the reason
+    # nothing could be found out instead.
+    done = pyqtSignal(object, str)
+
+    def start(self):
+        def work():
+            try:
+                self.done.emit(update.check(), "")
+            except hub.HubError as exc:
+                self.done.emit(None, str(exc))
+
+        threading.Thread(target=work, daemon=True).start()
 
 
 class Dikte:
@@ -116,6 +151,12 @@ class Dikte:
         # Which recording is the current one, so a timer set for the run that
         # started it cannot stop the one that came after.
         self._run_id = 0
+        # The application that was in front when the recording started, which
+        # is where the transcript is meant to go, and the timer watching for
+        # the moment it has to be put back there. macOS only; see
+        # _give_the_front_back.
+        self.front_before = None
+        self._front_watch = None
 
         self.overlay = Overlay(self.conf["overlay_corner"])
         # The agent's indicator sits on top of the dictation one when both are
@@ -171,6 +212,17 @@ class Dikte:
         self.meeting_ticker.setInterval(500)
         self.meeting_ticker.timeout.connect(self._meeting_tick)
 
+        # What the last check found, read from disk rather than asked for, so
+        # that a tray built in the next line already knows to say so.
+        self.update_release = update.pending()
+        self.updates = UpdateCheck()
+        self.updates.done.connect(self._on_update_checked)
+        self.update_ticker = QTimer()
+        self.update_ticker.setInterval(UPDATE_POLL_MS)
+        self.update_ticker.timeout.connect(self._look_for_update)
+        self.update_ticker.start()
+        QTimer.singleShot(UPDATE_DELAY_MS, self._look_for_update)
+
         self.tray = QSystemTrayIcon()
         self._apply_settings()
         self.tray.show()
@@ -223,6 +275,11 @@ class Dikte:
         self.menu.addAction(self.meeting_cancel_action)
         self.menu.addSeparator()
 
+        # Named in _refresh_update, and hidden until a check has found one.
+        self.update_action = QAction("", self.menu)
+        self.update_action.triggered.connect(self.open_release_page)
+        self.menu.addAction(self.update_action)
+
         self.settings_action = QAction(t("Settings…"), self.menu)
         self.settings_action.triggered.connect(self.open_settings)
         self.menu.addAction(self.settings_action)
@@ -239,6 +296,7 @@ class Dikte:
         self.tray.setContextMenu(self.menu)
         self.tray.setToolTip(t("Dikte: ready"))
         self.tray.activated.connect(self._tray_clicked)
+        self._refresh_update()
         self._set_icon("audio-input-microphone")
 
     def _tray_clicked(self, reason):
@@ -578,9 +636,19 @@ class Dikte:
         timer.restart()
         return False
 
+    def _the_front(self):
+        """The application a recording is about to start from, or None.
+
+        Asked before the indicator goes up rather than alongside the
+        microphone: putting a window on screen can take the front as well, and
+        once it has, the only answer left to the question is Dikte.
+        """
+        return mac_window.frontmost_pid() if sys.platform == "darwin" else None
+
     def start(self):
         if self.state != IDLE or self.recording:
             return
+        self.front_before = self._the_front()
         self.overlay.show_recording()
         self._begin_recording(DICTATION)
         # A recorder that could not start has already said so, synchronously,
@@ -594,6 +662,7 @@ class Dikte:
     def start_ask(self):
         if self.ask_state != IDLE or self.recording:
             return
+        self.front_before = self._the_front()
         self.ask_overlay.show_recording(asking=True)
         self._begin_recording(ASK)
         if not self.recorder.active:
@@ -608,6 +677,80 @@ class Dikte:
         self.elapsed.restart()
         self.ticker.start()
         self.recorder.start(self.conf["mic_target"], self.conf["max_seconds"])
+        self._give_the_front_back(self.front_before)
+
+    def _give_the_front_back(self, was_in_front):
+        """Hand the front back to whoever had it when the recording started.
+
+        On macOS a recording goes through ffmpeg's avfoundation input, and
+        opening a capture session there brings the process that did it to the
+        front. ffmpeg is a child of Dikte with no bundle of its own, so the
+        system credits the move to Dikte: the window the user was typing in
+        loses the front, its caret stops, its title bar greys out, and the
+        Cmd+V at the end of the dictation has nowhere to land. Measured with a
+        TextEdit document in front:
+
+            press the shortcut          front = TextEdit
+            recorder.start returns      front = TextEdit
+            89 ms later                 front = Dikte
+
+        Nothing about the capture session can be asked not to do this. It is
+        not a window of ours and no flag reaches it. Starting ffmpeg in its own
+        session, and clearing __CFBundleIdentifier from its environment, were
+        both tried and both measured to make no difference. So it is undone
+        instead. The move lands a moment after the process starts rather than
+        during the call, hence the short watch rather than one attempt: it
+        gives up as soon as it has put the front back, and in any case after a
+        second and a half, which is longer than the microphone has ever taken
+        to open.
+
+        Silent off macOS, and silent when the recording started from Dikte
+        itself: there is nothing to give back.
+        """
+        # One watch at a time. A second recording started before the first
+        # watch had finished would otherwise leave two of them running, and the
+        # older one would put the front back where the older recording
+        # started, which by then is the wrong window.
+        if self._front_watch is not None:
+            self._front_watch.stop()
+            self._front_watch = None
+        if not was_in_front or was_in_front == os.getpid():
+            return
+        deadline = time.monotonic() + 1.5
+        watch = QTimer(self.app)
+        # Ten milliseconds because the front is already gone by the time this
+        # notices, and every tick it waits is a tick of the user's window drawn
+        # inactive: at forty the title bar visibly blinks, at ten it does not.
+        # Two messages to AppKit per tick, for at most a second and a half.
+        watch.setInterval(10)
+        # activateWithOptions: answers whether macOS accepted the request, not
+        # whether the other application is already back in front.  Keep the
+        # watch alive until that asynchronous handoff is observable; on Intel
+        # Macs it can take hundreds of milliseconds after the call returned.
+        restore_requested = False
+
+        def look():
+            nonlocal restore_requested
+            if time.monotonic() > deadline:
+                self._stop_watching_the_front()
+                return
+            if mac_window.is_frontmost():
+                if not restore_requested:
+                    restore_requested = mac_window.activate(was_in_front)
+            elif restore_requested:
+                # The request has landed.  Stop only now, rather than as soon
+                # as AppKit accepted it, so a delayed or failed handoff stays
+                # under observation until the deadline guard above.
+                self._stop_watching_the_front()
+
+        watch.timeout.connect(look)
+        self._front_watch = watch
+        watch.start()
+
+    def _stop_watching_the_front(self):
+        if self._front_watch is not None:
+            self._front_watch.stop()
+            self._front_watch = None
 
     def stop(self):
         if self.state != RECORDING:
@@ -725,6 +868,12 @@ class Dikte:
             return
         base = meeting.new_base()
         _, wav_path = cfg.meeting_paths(base)
+        # A meeting opens the same capture as a dictation does, and takes the
+        # front the same way: whoever is being recorded is in a call, and
+        # having their window go inactive mid-sentence is worse here than
+        # anywhere else. Kept as a local rather than on self: a dictation may
+        # already be waiting on its own note for where to paste.
+        was_in_front = self._the_front()
         self.meeting_recorder.start(
             str(wav_path),
             self.conf["meeting_mic_target"] or self.conf["mic_target"],
@@ -733,6 +882,7 @@ class Dikte:
         )
         if not self.meeting_recorder.active:
             return  # start() has already said what went wrong
+        self._give_the_front_back(was_in_front)
         self.meeting_base = base
         self.meeting_elapsed.restart()
         self.meeting_ticker.start()
@@ -859,11 +1009,13 @@ class Dikte:
     def _on_recorded(self, wav_path, duration, rms_values):
         owner, self.recorder_owner = self.recorder_owner, None
         wants_paste = self.paste_override.pop(owner, None)
+        focus, self.front_before = self.front_before, None
         if owner == ASK:
             self.ask_pipeline.run(wav_path, duration, rms_values, ask=True,
-                                  paste=wants_paste)
+                                  paste=wants_paste, focus=focus)
         else:
-            self.pipeline.run(wav_path, duration, rms_values, paste=wants_paste)
+            self.pipeline.run(wav_path, duration, rms_values,
+                              paste=wants_paste, focus=focus)
 
     def _on_finished(self, _raw, text, warning):
         if warning:
@@ -954,12 +1106,58 @@ class Dikte:
         if len(message) > len(first_line):
             self.tray.showMessage("Dikte", message, QSystemTrayIcon.MessageIcon.Warning, 8000)
 
+    # ---- updates ----------------------------------------------------------
+
+    def _look_for_update(self):
+        """The timer. update.py decides whether this is a request or a memory."""
+        if not self.conf["update_check"]:
+            return
+        self.updates.start()
+
+    def _on_update_checked(self, release, error):
+        if error:
+            # Nobody asked for this, so nobody is waiting to be told it failed.
+            # A machine that is offline, or a GitHub that is rate-limiting the
+            # address, is not a thing to interrupt a dictation about.
+            print(f"dikte: update check: {error}", file=sys.stderr)
+            return
+        if release is None:
+            return
+        self._found_update(release)
+        # Once per version. A check that runs every day must not be a
+        # notification every day for an update somebody has decided to skip.
+        if update.announced() != release.version:
+            update.mark_announced(release.version)
+            self.tray.showMessage(
+                "Dikte",
+                t("Dikte {version} is out. The tray menu has the release page.",
+                  version=release.version),
+                QSystemTrayIcon.MessageIcon.Information, 8000,
+            )
+
+    def _found_update(self, release):
+        self.update_release = release
+        self._refresh_update()
+
+    def _refresh_update(self):
+        release = self.update_release
+        self.update_action.setVisible(release is not None)
+        if release is not None:
+            self.update_action.setText(
+                t("Dikte {version} is out…", version=release.version))
+
+    def open_release_page(self):
+        release = self.update_release
+        QDesktopServices.openUrl(
+            QUrl(release.url if release is not None else update.RELEASES_PAGE))
+
     # ---- settings ---------------------------------------------------------
 
     def open_settings(self):
         if self.settings_window is None:
             self.settings_window = SettingsWindow(self.conf, self.meetings)
             self.settings_window.applied.connect(self._apply_settings)
+            self.settings_window.update_found.connect(self._found_update)
             self.settings_window.finished.connect(self._settings_closed)
         self.settings_window.show()
         self.settings_window.raise_()

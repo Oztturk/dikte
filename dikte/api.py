@@ -58,10 +58,20 @@ def timestamp_model(provider, selected=""):
     return "openai/whisper-1" if provider == "openrouter" else "whisper-1"
 
 
+# What a gateway in front of the model answers of its own accord: the request
+# never reached the model, or the model was still working when the connection
+# was given up on. Trying again is the only thing that fixes any of them, and
+# with a long file it is worth the second try rather than losing the run.
+RETRY_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+
 class ApiError(Exception):
-    def __init__(self, message, status=None):
+    def __init__(self, message, status=None, retryable=None):
         super().__init__(message)
         self.status = status
+        # Anything not on that list is the request itself being wrong, and it
+        # will be just as wrong the second time.
+        self.retryable = status in RETRY_STATUS if retryable is None else retryable
 
 
 class Aborted(Exception):
@@ -218,7 +228,7 @@ def explain(exc, service):
     if exc.status == 429:
         return ApiError(t("{service} is rate limiting you (HTTP 429). Try again in "
                           "a moment.", service=service), exc.status)
-    return ApiError(f"{service}: {exc}", exc.status)
+    return ApiError(f"{service}: {exc}", exc.status, retryable=exc.retryable)
 
 
 def _request(url, data, headers, timeout=120, aborter=None):
@@ -234,8 +244,11 @@ def _request(url, data, headers, timeout=120, aborter=None):
         # not the network failing. URLError is an OSError, so both land here.
         if aborter is not None and aborter.aborted:
             raise Aborted from None
+        # A connection that dropped or timed out is the same bad minute as a
+        # 502, so it is worth the same second try.
         raise ApiError(t("Could not connect: {reason}",
-                         reason=getattr(exc, "reason", exc))) from exc
+                         reason=getattr(exc, "reason", exc)),
+                       retryable=True) from exc
     except json.JSONDecodeError as exc:
         raise ApiError(t("Could not parse the response: {error}", error=exc)) from exc
 
@@ -318,7 +331,7 @@ def local_failure(service, server, exc):
     """
     detail = server.error()
     return ApiError(f"{service}: {exc}" + (f" ({detail})" if detail else ""),
-                    exc.status)
+                    exc.status, retryable=exc.retryable)
 
 
 def _transcribe_request(target, audio_path, language, prompt, response_format,

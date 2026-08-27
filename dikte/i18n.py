@@ -244,16 +244,6 @@ TR = {
     "Connection works. {count} models visible.":
         "Bağlantı tamam. {count} model görünüyor.",
     "Clean the transcript with a model": "Transkripti bir modelle temizle",
-    "OpenRouter, Google AI Studio and OpenCode Go are the quick ones that need "
-    "nothing installed. llama.cpp runs here, on a model downloaded below. "
-    "Claude Code, Codex and Antigravity clean up on a subscription you already "
-    "have, without a second key, and take a few seconds longer because each "
-    "opens a session to do it.":
-        "OpenRouter, Google AI Studio ve OpenCode Go kurulum istemeyen hızlı "
-        "seçeneklerdir. llama.cpp burada, aşağıdan indirilen bir modelle "
-        "çalışır. Claude Code, Codex ve Antigravity temizliği hâlihazırda sahip "
-        "olduğun bir abonelik üzerinden, ikinci anahtar olmadan yapar; her biri "
-        "bunun için bir oturum açtığından birkaç saniye daha uzun sürer.",
     "{binary} is not on your PATH, so cleanup would fail and the raw transcript "
     "would be pasted. Install it, or pick another one above.":
         "{binary} PATH'te değil; temizleme başarısız olur ve ham transkript "
@@ -523,18 +513,6 @@ TR = {
 
     # --- settings: the agent ------------------------------------------------
     "Agent": "Ajan",
-    "This shortcut records the same way dictation does, but the transcript is "
-    "not what gets pasted. It goes to an agent as a command, and what comes "
-    "back is pasted instead: the answer to a question, or a sentence saying "
-    "what was done. Claude Code, Codex and Antigravity run as the session you "
-    "would have opened yourself, with your skills, your connected services and "
-    "your account.":
-        "Bu kısayol dikte ile aynı şekilde kaydeder, ama yapıştırılan şey "
-        "transkript değildir. Transkript bir ajana komut olarak gider ve yerine "
-        "oradan döneni yapıştırılır: bir sorunun cevabı ya da ne yapıldığını "
-        "söyleyen bir cümle. Claude Code, Codex ve Antigravity kendi açacağın "
-        "oturumun aynısı olarak çalışır: skill'lerinle, bağlı servislerinle "
-        "ve kendi hesabınla.",
     "How it runs": "Nasıl çalışıyor",
     "Runs on": "Şunun üstünde çalışır",
     "More thinking is slower, and you are standing in front of the screen while "
@@ -707,12 +685,6 @@ TR = {
 
     # --- settings: meeting --------------------------------------------------
     "Minutes": "Tutanaklar",
-    "A meeting is recorded from two devices at once: your microphone and "
-    "whatever comes out of your speakers. Nothing has to guess who was "
-    "speaking, because the two never share a channel.":
-        "Toplantı iki aygıttan aynı anda kaydedilir: mikrofonun ve hoparlöründen "
-        "çıkan ses. Kimin konuştuğunun tahmin edilmesi gerekmez, çünkü ikisi hiç "
-        "aynı kanala girmez.",
     "Sound": "Ses",
     "Same as dictation": "Diktedekiyle aynı",
     "Current output": "Geçerli çıkış",

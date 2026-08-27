@@ -150,7 +150,7 @@ TR = {
     # --- settings: tabs and general ------------------------------------
     "Dikte Settings": "Dikte Ayarları",
     "General": "Genel",
-    "Display": "Görüntü",
+    "Display": "Ekran",
     "API and models": "API ve modeller",
     "Cleanup rules": "Temizleme kuralları",
     "Audio file": "Ses dosyası",

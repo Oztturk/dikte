@@ -114,15 +114,8 @@ seçersen sesi yazıya çevirme **OpenAI**, **Groq** ya da **OpenRouter**'da
 (varsayılan `gpt-4o-transcribe`), temizleme OpenRouter'da
 (`google/gemini-3.5-flash-lite`) ya da kuruluysa Claude Code veya Codex'te
 çalışır. Anahtarları boş bırakırsan `OPENAI_API_KEY`, `GROQ_API_KEY` ve
-`OPENROUTER_API_KEY` kullanılır.
-
-Gösterge ekranı ve köşesi dahil bütün ayarlar uygulamanın dışında saklanır:
-Linux'ta `$XDG_CONFIG_HOME/dikte/config.json` (normalde
-`~/.config/dikte/config.json`), Windows'ta `%APPDATA%\Dikte\config.json`,
-macOS'ta `~/Library/Application Support/Dikte/config.json`. Unix izinlerinin
-geçerli olduğu sistemlerde dosyanın izni 600'dür. Bu nedenle Dikte'yi yeniden
-derlemek, değiştirmek veya güncellemek ayarları silmez. Yalnızca bu dosyayı
-silmek ya da kaldırıcıyı `--purge` ile çalıştırmak ayarları sıfırlar.
+`OPENROUTER_API_KEY` kullanılır; anahtarlar `~/.config/dikte/config.json`
+içinde, izinler 600, Mac'te ise `~/Library/Application Support/Dikte` altında.
 Temizlemeyi tamamen kapatabilirsin, o zaman ham transkript yapıştırılır; modelin
 yanındaki kutudan düşünme seviyesini de seçebilirsin.
 

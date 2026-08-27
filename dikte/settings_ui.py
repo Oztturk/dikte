@@ -732,10 +732,14 @@ class SettingsWindow(QDialog):
         self.indicator_screen = QComboBox()
         self.indicator_screen.addItem(t("Follow the mouse pointer"), "")
         for screen in QGuiApplication.screens():
+            # The native resolution, so that a scaled 4K screen reads
+            # 3840 × 2160 and not the 1920 × 1080 Qt sees through the scale.
             area = screen.geometry()
+            ratio = screen.devicePixelRatio()
             self.indicator_screen.addItem(
                 t("{name} ({width} × {height})", name=screen.name(),
-                  width=area.width(), height=area.height()),
+                  width=round(area.width() * ratio),
+                  height=round(area.height() * ratio)),
                 screen.name(),
             )
         form.addRow(t("Indicator screen"), self.indicator_screen)

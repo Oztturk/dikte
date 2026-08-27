@@ -246,7 +246,10 @@ class Overlay(QWidget):
         self.resize(width, HEIGHT)
 
     def _reposition(self):
-        # On a multi-monitor setup, show up where the user actually is.
+        # The screen the settings name, or, when none is named or it is not
+        # plugged in right now, where the user actually is. Names are connector
+        # names on X11 and model names on macOS, where two identical monitors
+        # can share one; the first then wins.
         screen = next(
             (item for item in QApplication.screens() if item.name() == self.screen_name),
             None,

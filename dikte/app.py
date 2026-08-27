@@ -1103,14 +1103,19 @@ class Dikte:
 
     def open_settings(self):
         if self.settings_window is None:
-            self.settings_window = SettingsWindow(self.conf, self.meetings)
-            self.settings_window.applied.connect(self._apply_settings)
-            self.settings_window.language_changed.connect(self._reopen_settings)
-            self.settings_window.update_found.connect(self._found_update)
-            self.settings_window.finished.connect(self._settings_closed)
+            self._make_settings()
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+
+    def _make_settings(self):
+        """Build the window without showing it, so a caller that knows where
+        it belongs can place it first."""
+        self.settings_window = SettingsWindow(self.conf, self.meetings)
+        self.settings_window.applied.connect(self._apply_settings)
+        self.settings_window.language_changed.connect(self._reopen_settings)
+        self.settings_window.update_found.connect(self._found_update)
+        self.settings_window.finished.connect(self._settings_closed)
 
     def _settings_closed(self, *_):
         # Don't drop the object while its own signal is still being delivered.
@@ -1135,11 +1140,19 @@ class Dikte:
         # would drop the reference to the new window a moment after it is made.
         old.finished.disconnect(self._settings_closed)
         old.close()
-        old.deleteLater()
+        # No deleteLater: a daemon thread of the old window's may still be
+        # running, and a closure holding self is what keeps the object alive
+        # until the thread is done. Dropping the reference is how the ordinary
+        # close path lets a window go, and it is enough here too.
         self.settings_window = None
-        self.open_settings()
-        self.settings_window.tabs.setCurrentIndex(tab)
+        self._make_settings()
+        # Placed and turned to the old tab before it is shown, so the new
+        # window does not come up at the default size and jump.
         self.settings_window.setGeometry(geometry)
+        self.settings_window.tabs.setCurrentIndex(tab)
+        self.settings_window.show()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
 
     def _apply_local(self):
         """Pass the local settings on, and hold the models ready if asked to.

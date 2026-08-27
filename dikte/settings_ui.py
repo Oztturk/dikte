@@ -1804,8 +1804,21 @@ class SettingsWindow(QDialog):
         # waits until the box is dismissed, so the window is not pulled out
         # from under a dialog it is holding up.
         QMessageBox.information(self, t("Dikte Settings"), t("Saved successfully."))
-        if i18n.language() != self._built_language:
+        if i18n.language() != self._built_language and not self._work_in_flight():
             self.language_changed.emit()
+
+    def _work_in_flight(self):
+        """A daemon thread of this window's is still running.
+
+        Replacing the window now would let it be collected, taking the C++
+        side of the model boxes down with it, and the thread's next progress
+        report would land on a deleted object. The stale labels stand until a
+        later save finds the window quiet; _built_language keeps the old
+        language, so that save asks for the rebuild by itself.
+        """
+        return (self.transcriber.busy
+                or self.local_whisper._downloading
+                or self.local_llm._downloading)
 
     @staticmethod
     def _select_data(combo, value):

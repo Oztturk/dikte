@@ -40,9 +40,11 @@ class Overlay(QWidget):
     of covering it, which is what lets a dictation and a command to the agent be
     under way at the same time and still both be visible."""
 
-    def __init__(self, corner="bottom-left", below=None, dismissable=False):
+    def __init__(self, corner="bottom-left", below=None, dismissable=False,
+                 screen_name=""):
         super().__init__(None)
         self.corner = corner
+        self.screen_name = screen_name
         self.below = below
         # A job that can run for ten minutes should not have to be watched for
         # ten minutes. Clicking such an indicator puts the progress away; the
@@ -245,7 +247,11 @@ class Overlay(QWidget):
 
     def _reposition(self):
         # On a multi-monitor setup, show up where the user actually is.
-        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        screen = next(
+            (item for item in QApplication.screens() if item.name() == self.screen_name),
+            None,
+        )
+        screen = screen or QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         area = screen.availableGeometry()
         left = "left" in self.corner
         top = "top" in self.corner

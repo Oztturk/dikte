@@ -117,11 +117,17 @@ run here by default, on models of your own. The cloud is the other option:
 speech to text on **OpenAI**, **Groq** or **OpenRouter** (`gpt-4o-transcribe`),
 cleanup on OpenRouter (`google/gemini-3.5-flash-lite`) or, when either is
 installed, on Claude Code or Codex. The keys fall back to `OPENAI_API_KEY`,
-`GROQ_API_KEY` and `OPENROUTER_API_KEY`, and are stored in
-`~/.config/dikte/config.json`, mode 600, or in
-`~/Library/Application Support/Dikte` on a Mac. Cleanup can be switched off, in
-which case the raw transcript is pasted, and a thinking model's effort can be
-set next to it.
+`GROQ_API_KEY` and `OPENROUTER_API_KEY`.
+
+All settings, including the indicator screen and corner, are stored outside the
+application: in `$XDG_CONFIG_HOME/dikte/config.json` (normally
+`~/.config/dikte/config.json`) on Linux, `%APPDATA%\Dikte\config.json` on
+Windows, and `~/Library/Application Support/Dikte/config.json` on macOS. The
+file is mode 600 where Unix permissions apply. Rebuilding, replacing or
+updating Dikte therefore keeps the settings. Only removing that file or
+uninstalling with `--purge` resets them. Cleanup can be switched off, in which
+case the raw transcript is pasted, and a thinking model's effort can be set
+next to it.
 
 ## Using it
 

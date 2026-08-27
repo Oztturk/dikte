@@ -915,13 +915,6 @@ class SettingsWindow(QDialog):
         self.cleanup_provider = QComboBox()
         for label, value in CLEANUP_PROVIDERS:
             self.cleanup_provider.addItem(t(label), value)
-        self.cleanup_provider.setToolTip(t(
-            "OpenRouter, Google AI Studio and OpenCode Go are the quick ones "
-            "that need nothing installed. llama.cpp runs here, on a model "
-            "downloaded below. Claude Code, Codex and Antigravity clean up on "
-            "a subscription you already have, without a second key, and take a "
-            "few seconds longer because each opens a session to do it."
-        ))
         self.cleanup_provider.currentIndexChanged.connect(self._cleanup_provider_changed)
         orr_form.addRow(t("Runs on"), self.cleanup_provider)
 
@@ -1051,17 +1044,6 @@ class SettingsWindow(QDialog):
     def _assistant_tab(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        intro = QLabel(t(
-            "This shortcut records the same way dictation does, but the "
-            "transcript is not what gets pasted. It goes to an agent as a "
-            "command, and what comes back is pasted instead: the answer to a "
-            "question, or a sentence saying what was done. Claude Code, Codex "
-            "and Antigravity run as the session you would have opened yourself, "
-            "with your skills, your connected services and your account."
-        ))
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
-
         self.assistant_found = QLabel("")
         self.assistant_found.setWordWrap(True)
         layout.addWidget(self.assistant_found)
@@ -1259,14 +1241,6 @@ class SettingsWindow(QDialog):
     def _meeting_tab(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        intro = QLabel(t(
-            "A meeting is recorded from two devices at once: your microphone and "
-            "whatever comes out of your speakers. Nothing has to guess who was "
-            "speaking, because the two never share a channel."
-        ))
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
-
         sources = QGroupBox(t("Sound"))
         sources_form = QFormLayout(sources)
         self.meeting_mic = QComboBox()

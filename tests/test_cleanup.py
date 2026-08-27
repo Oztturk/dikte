@@ -57,7 +57,9 @@ class Provider(DikteTest):
     def test_what_each_one_runs(self):
         self.assertEqual(cleanup.executable("claude"), "claude")
         self.assertEqual(cleanup.executable("codex"), "codex")
+        self.assertEqual(cleanup.executable("agy"), "agy")
         self.assertEqual(cleanup.executable("openrouter"), "")
+        self.assertEqual(cleanup.executable("gemini"), "")
         self.assertEqual(cleanup.executable("opencode"), "")
 
     def test_the_model_named_in_the_history_is_the_one_that_did_it(self):
@@ -74,6 +76,16 @@ class Provider(DikteTest):
         self.assertEqual(
             cleanup.model(self.config(cleanup_provider="codex",
                                       cleanup_codex_model="gpt-5.4")), "gpt-5.4")
+        self.assertEqual(
+            cleanup.model(self.config(cleanup_provider="gemini")),
+            "gemini-3.5-flash-lite")
+        # Antigravity is left on its own default the way Codex is.
+        self.assertEqual(
+            cleanup.model(self.config(cleanup_provider="agy")), "agy")
+        self.assertEqual(
+            cleanup.model(self.config(cleanup_provider="agy",
+                                      cleanup_agy_model="gemini-3.7-flash-low")),
+            "gemini-3.7-flash-low")
         self.assertEqual(
             cleanup.model(self.config(cleanup_provider="opencode",
                                       cleanup_opencode_model="glm-5.3")), "glm-5.3")
@@ -121,6 +133,46 @@ class OpenCode(DikteTest):
         patcher, calls = fake_cli(stdout="never")
         with patcher, mock.patch.object(api, "cleanup", return_value="Done."):
             cleanup.run("uh, done", conf, "the rules")
+        self.assertEqual(calls, [])
+
+
+class GoogleAiStudio(DikteTest):
+    """Cleanup over Google's OpenAI-compatible endpoint: one request, no CLI."""
+
+    def setUp(self):
+        super().setUp()
+        self.conf = self.config(cleanup_provider="gemini",
+                                gemini_api_key="AIza-test")
+
+    def test_it_goes_to_google_with_the_settings_as_they_were(self):
+        self.conf["cleanup_reasoning"] = "none"
+        with fake_urlopen(chat_reply("Done.")) as calls:
+            self.assertEqual(cleanup.run("uh, done", self.conf, "the rules"),
+                             "Done.")
+        self.assertEqual(
+            calls[0].full_url,
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+        payload = sent_json(calls[0])
+        self.assertEqual(payload["model"], "gemini-3.5-flash-lite")
+        self.assertEqual(payload["reasoning_effort"], "minimal")
+        self.assertIn("uh, done", payload["messages"][1]["content"])
+
+    def test_the_key_travels_as_a_bearer_token(self):
+        with fake_urlopen(chat_reply("Done.")) as calls:
+            cleanup.run("uh, done", self.conf, "the rules")
+        self.assertEqual(calls[0].get_header("Authorization"), "Bearer AIza-test")
+
+    def test_a_missing_key_names_google_rather_than_openrouter(self):
+        self.conf["gemini_api_key"] = ""
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                self.assertRaises(api.ApiError) as caught:
+            cleanup.run("uh, done", self.conf, "the rules")
+        self.assertIn("Google AI Studio", str(caught.exception))
+
+    def test_no_cli_is_started_for_it(self):
+        patcher, calls = fake_cli(stdout="never")
+        with patcher, fake_urlopen(chat_reply("Done.")):
+            cleanup.run("uh, done", self.conf, "the rules")
         self.assertEqual(calls, [])
 
 
@@ -249,6 +301,63 @@ class Codex(DikteTest):
     def test_an_answer_of_nothing(self):
         with self.assertRaises(cleanup.CleanupError):
             self.run_cleanup(stdout="tokens used 400", last_message="")
+
+
+class Antigravity(DikteTest):
+    def setUp(self):
+        super().setUp()
+        self.conf = self.config(cleanup_provider="agy")
+        self.patch_attr(cleanup.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+    def run_cleanup(self, text="uh, book it", **kwargs):
+        patcher, calls = fake_cli(**kwargs)
+        with patcher:
+            answer = cleanup.run(text, self.conf, "the rules")
+        return answer, calls[0]
+
+    def test_the_rules_ride_in_front_of_the_transcript(self):
+        answer, cmd = self.run_cleanup(stdout="Book it.\n")
+        self.assertEqual(answer, "Book it.")
+        self.assertEqual(cmd[0], "agy")
+        self.assertEqual(cmd[cmd.index("-p") + 1],
+                         "the rules\n\n---\n\n<transcript>\nuh, book it\n</transcript>")
+
+    def test_it_starts_somewhere_of_its_own_and_takes_no_slash_commands(self):
+        """Without --new-project agy works in whichever project it was last in."""
+        _, cmd = self.run_cleanup(stdout="Book it.")
+        self.assertIn("--new-project", cmd)
+        self.assertIn("--disable-slash-commands", cmd)
+        self.assertEqual(cmd[cmd.index("--output-format") + 1], "text")
+
+    def test_it_is_not_left_to_give_up_before_the_caller_does(self):
+        _, cmd = self.run_cleanup(stdout="Book it.")
+        self.assertEqual(cmd[cmd.index("--print-timeout") + 1], "180s")
+
+    def test_the_model_is_left_alone_until_one_is_typed_in(self):
+        _, cmd = self.run_cleanup(stdout="Book it.")
+        self.assertNotIn("--model", cmd)
+        self.conf["cleanup_agy_model"] = "gemini-3.7-flash-low"
+        _, cmd = self.run_cleanup(stdout="Book it.")
+        self.assertEqual(cmd[cmd.index("--model") + 1], "gemini-3.7-flash-low")
+
+    def test_the_thinking_setting_lands_on_the_nearest_rung_agy_has(self):
+        self.conf["cleanup_reasoning"] = "max"
+        _, cmd = self.run_cleanup(stdout="Book it.")
+        self.assertEqual(cmd[cmd.index("--effort") + 1], "high")
+
+    def test_no_thinking_setting_means_no_flag(self):
+        _, cmd = self.run_cleanup(stdout="Book it.")
+        self.assertNotIn("--effort", cmd)
+
+    def test_an_answer_of_nothing_is_a_failure_rather_than_an_empty_paste(self):
+        with self.assertRaises(cleanup.CleanupError):
+            self.run_cleanup(stdout="   ")
+
+    def test_a_program_that_is_not_installed_says_so_before_running_anything(self):
+        self.patch_attr(cleanup.shutil, "which", lambda name: "")
+        with self.assertRaises(cleanup.CleanupError) as caught:
+            self.run_cleanup(stdout="Book it.")
+        self.assertIn("agy", str(caught.exception))
 
 
 if __name__ == "__main__":

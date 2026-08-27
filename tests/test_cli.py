@@ -15,6 +15,7 @@ from typing import ClassVar
 from unittest import mock
 
 from dikte import audio
+from dikte import cleanup
 from dikte import cli
 from dikte import config as cfg
 from dikte import ggml
@@ -521,6 +522,26 @@ class Doctor(DikteTest):
         self.assertIn("OpenCode Go key, cleaning up on glm-5.3",
                       self.run_doctor(as_json=False, cleanup_provider="opencode",
                                       cleanup_opencode_model="glm-5.3"))
+
+    def test_it_survives_every_provider_cleanup_can_be_set_to(self):
+        """It used to raise KeyError on the local model, whose executable is ""."""
+        for name in cleanup.PROVIDERS:
+            with self.subTest(provider=name):
+                reply = self.run_doctor(cleanup_provider=name)
+                self.assertEqual(reply["cleanup"]["provider"], name)
+                self.run_doctor(as_json=False, cleanup_provider=name)
+
+    def test_a_provider_with_no_key_to_check_says_so_rather_than_no(self):
+        """A CLI needs none, so `false` there would read as one gone missing."""
+        self.assertIsNone(self.run_doctor(cleanup_provider="claude")["cleanup"]["key"])
+        self.assertIsNone(self.run_doctor(cleanup_provider="local")["cleanup"]["key"])
+        self.assertIs(self.run_doctor(cleanup_provider="gemini")["cleanup"]["key"],
+                      False)
+
+    def test_cleanup_on_google_is_a_question_about_its_own_key(self):
+        line = self.run_doctor(as_json=False, cleanup_provider="gemini",
+                               cleanup_gemini_model="gemini-2.5-flash")
+        self.assertIn("Google AI Studio key, cleaning up on gemini-2.5-flash", line)
 
     def test_it_asks_after_the_programs_this_desktop_actually_uses(self):
         """A missing ydotool on a Mac is a red mark with nothing behind it."""

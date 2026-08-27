@@ -28,6 +28,11 @@ from dikte import settings_ui
 from dikte import update
 from tests.support import DikteTest, only_these_tools
 
+# The harness below replaces this method on the class so that opening a window
+# in a test never calls anybody; taken here, before any test runs, so the two
+# tests about what it does when called still have the real one.
+REAL_LOAD_HOSTED_MODELS = settings_ui.SettingsWindow._load_hosted_models
+
 # One application for the whole run; Qt allows no second one.
 _app = QApplication.instance() or QApplication([])
 
@@ -42,6 +47,7 @@ CHANGED = {
     "paste_shortcut": "ctrl+shift+v",
     "restore_clipboard": True,
     "overlay_corner": "top-right",
+    "overlay_screen": "DP-1",
     "max_seconds": 120,
     "skip_silent": False,
     "silence_db": -42.0,
@@ -50,6 +56,7 @@ CHANGED = {
     "openai_api_key": "sk-test-key",
     "groq_api_key": "gsk-test-key",
     "openrouter_api_key": "sk-or-test-key",
+    "gemini_api_key": "AIza-test-key",
     "transcribe_provider": "openrouter",
     "transcribe_model": "whisper-1",
     "groq_transcribe_model": "whisper-large-v3",
@@ -59,6 +66,8 @@ CHANGED = {
     "cleanup_model": "some/other-model",
     "cleanup_claude_model": "opus",
     "cleanup_codex_model": "gpt-5",
+    "cleanup_gemini_model": "gemini-2.5-flash",
+    "cleanup_agy_model": "gemini-3.1-pro-low",
     "cleanup_reasoning": "high",
     "local_model": "ggml-small.bin",
     "local_gpu": False,
@@ -78,6 +87,7 @@ CHANGED = {
     "assistant_codex_model": "gpt-5",
     "assistant_codex_sandbox": "read-only",
     "assistant_openrouter_model": "some/agent-model",
+    "assistant_agy_model": "gemini-3.1-pro-low",
     "assistant_reasoning": "high",
     "assistant_dir": "/tmp",
     "assistant_timeout": 600,
@@ -136,7 +146,9 @@ class Settings(DikteTest):
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_codex_models"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
-                                            "_load_opencode_models"))
+                                            "_load_agy_models"))
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_hosted_models"))
         # The local model boxes fetch their own list the moment they are shown,
         # from a thread, which is nobody's test failing but a real request.
         self.enterContext(mock.patch.object(settings_ui.LocalModelBox,
@@ -163,7 +175,7 @@ class Settings(DikteTest):
     def test_the_window_opens_with_every_tab_on_it(self):
         window = self.window(cfg.Config())
         tabs = window.findChildren(settings_ui.QTabWidget)[0]
-        self.assertEqual(tabs.count(), 9)
+        self.assertEqual(tabs.count(), 10)
         self.assertEqual(window.windowTitle(), "Dikte Settings")
 
     def test_no_tab_can_stretch_the_window_past_a_small_screen(self):
@@ -288,11 +300,11 @@ class Settings(DikteTest):
                          "my-own-model")
 
     def test_opencode_answering_refills_both_of_its_boxes(self):
-        """The catalog fetched at open replaces the built-in list in the
-        cleanup and agent boxes alike, and neither loses what was picked."""
+        """The fetched catalog replaces the built-in list in the cleanup and
+        agent boxes alike, and neither loses what was picked."""
         conf = self.config(cleanup_opencode_model="my-own-model")
         window = self.window(conf)
-        window._on_opencode_models_loaded(["glm-9", "kimi-k9"])
+        window._on_opencode_models_loaded(["glm-9", "kimi-k9"], "")
         for combo in (window.cleanup_opencode_model,
                       window.assistant_opencode_model):
             with self.subTest(combo=combo.objectName() or "combo"):
@@ -301,15 +313,13 @@ class Settings(DikteTest):
         self.assertEqual(window.cleanup_opencode_model.currentText(),
                          "my-own-model")
 
-    def test_a_fetched_opencode_list_lands_in_opencode_s_own_box(self):
-        """The OpenRouter and meeting boxes are not refilled by another
-        provider's catalog, and the picked model survives the refill."""
+    def test_opencode_s_list_arriving_at_open_leaves_the_other_boxes_alone(self):
         conf = self.config(cleanup_opencode_model="my-own-model",
                            meeting_model="some/meeting-model")
         window = self.window(conf)
         before = [window.meeting_model.itemText(i)
                   for i in range(window.meeting_model.count())]
-        window._on_models_loaded(["glm-5.3", "kimi-k3"], "", "opencode")
+        window._on_hosted_models_loaded("opencode", ["glm-5.3", "kimi-k3"])
         combo = window.cleanup_opencode_model
         offered = [combo.itemText(i) for i in range(combo.count())]
         self.assertEqual(offered, ["glm-5.3", "kimi-k3"])
@@ -317,13 +327,61 @@ class Settings(DikteTest):
         self.assertEqual([window.meeting_model.itemText(i)
                           for i in range(window.meeting_model.count())], before)
 
-    def test_opencode_cleanup_still_offers_the_fetch_button(self):
+    def test_opencode_cleanup_offers_a_fetch_button_of_its_own(self):
         """The OpenRouter button leaves the screen with its box, so OpenCode Go
         carries its own."""
         window = self.window(cfg.Config())
         window._select_data(window.cleanup_provider, "opencode")
         self.assertFalse(window.cleanup_opencode_model_row.isHidden())
         self.assertTrue(window.cleanup_model_row.isHidden())
+
+    def test_agy_answering_refills_both_of_its_boxes(self):
+        """The same arrangement as Codex: both boxes, nothing chosen is lost."""
+        conf = self.config(cleanup_agy_model="my-own-model")
+        window = self.window(conf)
+        window._on_agy_models_loaded(["gemini-4-flash-low", "gemini-4-pro-low"])
+        for combo in (window.cleanup_agy_model, window.assistant_agy_model):
+            with self.subTest(combo=combo.objectName() or "combo"):
+                offered = [combo.itemText(i) for i in range(combo.count())]
+                self.assertEqual(offered[1:],
+                                 ["gemini-4-flash-low", "gemini-4-pro-low"])
+        self.assertEqual(window.cleanup_agy_model.currentText(), "my-own-model")
+
+    def test_openrouter_s_list_arriving_at_open_refills_cleanup_and_meetings(self):
+        conf = self.config(cleanup_model="my/own-model")
+        window = self.window(conf)
+        window._on_hosted_models_loaded("openrouter", ["a/one", "b/two"])
+        for combo in (window.cleanup_model, window.meeting_model):
+            with self.subTest(combo=combo.objectName() or "combo"):
+                offered = [combo.itemText(i) for i in range(combo.count())]
+                self.assertEqual(offered, ["a/one", "b/two"])
+        self.assertEqual(window.cleanup_model.currentText(), "my/own-model")
+
+    def test_google_s_list_arriving_at_open_refills_its_own_box_only(self):
+        window = self.window(self.config(cleanup_gemini_model="gemini-x"))
+        before = window.cleanup_model.count()
+        window._on_hosted_models_loaded("gemini", ["gemini-4-flash"])
+        offered = [window.cleanup_gemini_model.itemText(i)
+                   for i in range(window.cleanup_gemini_model.count())]
+        self.assertEqual(offered, ["gemini-4-flash"])
+        self.assertEqual(window.cleanup_gemini_model.currentText(), "gemini-x")
+        self.assertEqual(window.cleanup_model.count(), before)
+
+    def test_no_key_no_call_home_at_open(self):
+        """Opening Settings is not consent to be talked about to two vendors."""
+        window = self.window(self.config())
+        with mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(settings_ui.threading, "Thread") as thread:
+            REAL_LOAD_HOSTED_MODELS(window)
+        thread.assert_not_called()
+
+    def test_a_key_on_file_is_fetched_with_at_open(self):
+        window = self.window(self.config(openrouter_api_key="sk-or-x",
+                                         gemini_api_key="AIza-x",
+                                         opencode_api_key="opencode-x"))
+        with mock.patch.object(settings_ui.threading, "Thread") as thread:
+            REAL_LOAD_HOSTED_MODELS(window)
+        self.assertEqual(thread.call_count, 3)
 
     def test_the_update_line_names_the_version_that_is_running(self):
         window = self.window(cfg.Config())
@@ -982,6 +1040,17 @@ class Overlay(DikteTest):
                 widget.show_recording()
                 widget._reposition()
 
+    def test_a_named_screen_is_used_instead_of_the_pointer_screen(self):
+        screen = mock.Mock()
+        screen.name.return_value = "DP-1"
+        screen.availableGeometry.return_value = settings_ui.QRect(1920, 0, 1920, 1080)
+        widget = self.overlay(screen_name="DP-1")
+        with mock.patch.object(QApplication, "screens", return_value=[screen]), \
+                mock.patch.object(QApplication, "screenAt") as screen_at:
+            widget._reposition()
+        screen_at.assert_not_called()
+        self.assertEqual(widget.pos(), QPoint(1948, 995))
+
     def test_a_warning_and_an_error_both_show(self):
         widget = self.overlay()
         widget.show_warning("cleanup failed")
@@ -1044,7 +1113,9 @@ class MeetingSources(DikteTest):
                 mock.patch.object(settings_ui.SettingsWindow,
                                   "_load_codex_models"), \
                 mock.patch.object(settings_ui.SettingsWindow,
-                                  "_load_opencode_models"):
+                                  "_load_agy_models"), \
+                mock.patch.object(settings_ui.SettingsWindow,
+                                  "_load_hosted_models"):
             window = settings_ui.SettingsWindow(cfg.Config())
         self.addCleanup(window.deleteLater)
         self.addCleanup(window.close)
@@ -1077,7 +1148,9 @@ class LocalModels(DikteTest):
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
                                             "_load_codex_models"))
         self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
-                                            "_load_opencode_models"))
+                                            "_load_agy_models"))
+        self.enterContext(mock.patch.object(settings_ui.SettingsWindow,
+                                            "_load_hosted_models"))
 
     def window(self, conf):
         window = settings_ui.SettingsWindow(conf)
@@ -1158,3 +1231,29 @@ class LocalModels(DikteTest):
         self.assertFalse(window.cleanup_form.isRowVisible(window.cleanup_model_row))
         # Its own thinking box, because the two default to opposite things.
         self.assertFalse(window.cleanup_form.isRowVisible(window.cleanup_reasoning))
+
+    def test_each_cleaner_brings_its_own_model_row_and_no_other(self):
+        window = self.window(cfg.Config())
+        rows = {"openrouter": window.cleanup_model_row,
+                "gemini": window.cleanup_gemini_model_row,
+                "claude": window.cleanup_claude_model,
+                "codex": window.cleanup_codex_model,
+                "agy": window.cleanup_agy_model}
+        for chosen, row in rows.items():
+            with self.subTest(provider=chosen):
+                window._select_data(window.cleanup_provider, chosen)
+                for name, other in rows.items():
+                    self.assertEqual(window.cleanup_form.isRowVisible(other),
+                                     name == chosen)
+
+    def test_each_agent_brings_its_own_box_and_no_other(self):
+        window = self.window(cfg.Config())
+        boxes = {"claude": window.claude_box, "codex": window.codex_box,
+                 "agy": window.agy_box, "openrouter": window.openrouter_box}
+        for chosen, box in boxes.items():
+            with self.subTest(provider=chosen):
+                window._select_data(window.assistant_provider, chosen)
+                for name, other in boxes.items():
+                    # isHidden rather than isVisible: the window itself is never
+                    # shown in a test, so nothing in it is ever visible.
+                    self.assertEqual(other.isHidden(), name != chosen)

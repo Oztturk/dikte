@@ -1,10 +1,17 @@
-"""OpenAI, Groq, OpenRouter and this machine, stdlib only.
+"""OpenAI, Groq, OpenRouter, Google AI Studio and this machine, stdlib only.
 
-Transcription runs on any of the four: Groq and OpenRouter both mirror OpenAI's
-/audio/transcriptions endpoint field for field, and ggml.py starts whisper.cpp
-on that same path, so one multipart request serves all of them and only the key,
-the base URL and the model id change. llama.cpp answers /chat/completions the way
-OpenRouter does, so cleanup here is the same request too.
+Transcription runs on the first three and on this machine: Groq and OpenRouter
+both mirror OpenAI's /audio/transcriptions endpoint field for field, and ggml.py
+starts whisper.cpp on that same path, so one multipart request serves all of
+them and only the key, the base URL and the model id change. llama.cpp answers
+/chat/completions the way OpenRouter does, so cleanup here is the same request
+too.
+
+Google AI Studio is here for cleanup and nothing else. Its OpenAI-compatible
+endpoint answers /chat/completions and /models, but there is no
+/audio/transcriptions behind it: audio only goes in as base64 inside a chat
+message, and what comes back has none of the segment times a subtitle file or a
+meeting transcript is built out of.
 
 What is on this machine has no key, and its base URL is not known until a server
 is up, which is the one thing this module has to fill in for it.
@@ -31,6 +38,7 @@ USER_AGENT = f"dikte/1.0 (+{APP_URL})"
 OPENAI_URL = "https://api.openai.com/v1"
 GROQ_URL = "https://api.groq.com/openai/v1"
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 
 # The floor for a local request. The timeouts elsewhere are sized for a hosted
 # API, where a slow answer is a bill running; here the only thing being spent is
@@ -254,9 +262,22 @@ def _request(url, data, headers, timeout=120, aborter=None):
 
 
 def _extract_error(body):
+    """The line worth showing out of a failed request's body.
+
+    Whatever comes back, this has to end in a string: it is called while an
+    ApiError is being raised, and an exception thrown here would escape the
+    `except ApiError` every caller is holding and lose the dictation the raw
+    transcript would otherwise have been pasted from.
+    """
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
+        return body[:300]
+    if isinstance(payload, list):
+        # Google answers some failures with an array holding the object the
+        # other providers send on its own.
+        payload = next((item for item in payload if isinstance(item, dict)), None)
+    if not isinstance(payload, dict):
         return body[:300]
     err = payload.get("error")
     if isinstance(err, dict):
@@ -448,14 +469,24 @@ def transcribe_segments(target, audio_path, language="", prompt="", timeout=300,
     return out
 
 
+# The settings window offers OpenRouter's ladder, and Google has neither end of
+# it: "none" is refused outright with a 400, and there is nothing above "high".
+# Both ends land on the nearest rung that does exist, which costs the cleanup
+# rather than the dictation when it is wrong. "minimal" is where "off" goes, and
+# it is the quickest of them by a wide margin, which is what cleanup wants
+# anyway.
+GEMINI_EFFORT = {"none": "minimal", "xhigh": "high", "max": "high"}
+
+
 def _thinking(payload, provider, reasoning):
     """Ask for as much thinking as this provider understands, or for none.
 
     An empty level means "whatever the model does on its own", so nothing is
-    sent. The two mean opposite things by that, which is why the setting is kept
-    per provider: OpenRouter's cleanup models answer straight away, while a local
-    model that was trained to think will think, and cleanup is punctuation rather
-    than a job worth thinking about.
+    sent. The three mean opposite things by that, which is why the setting is
+    kept per provider: OpenRouter's cleanup models answer straight away, while a
+    local model that was trained to think will think, and a Gemini Flash left to
+    itself thinks too. Cleanup is punctuation rather than a job worth thinking
+    about.
     """
     if not reasoning:
         return
@@ -463,6 +494,13 @@ def _thinking(payload, provider, reasoning):
         # What llama.cpp passes to the chat template. The models that think read
         # it; the ones that do not ignore it.
         payload["chat_template_kwargs"] = {"enable_thinking": reasoning != "none"}
+    elif provider == "gemini":
+        # Google's compatibility layer takes OpenAI's flat field rather than
+        # OpenRouter's object, and it has no word for off, so "none" is asked
+        # for as the lowest rung it has rather than skipped: a Flash model left
+        # to decide for itself thinks, and thinking about a comma is the second
+        # this provider was chosen to save.
+        payload["reasoning_effort"] = GEMINI_EFFORT.get(reasoning, reasoning)
     elif reasoning != "none":
         # The thinking itself is never shown, so ask for it to be left out.
         payload["reasoning"] = {"effort": reasoning, "exclude": True}
@@ -610,6 +648,37 @@ def openrouter_models(api_key="", transcription=False):
                   if "transcription" in (m.get("architecture") or {}).get(
                       "output_modalities", [])]
     return sorted(m["id"] for m in models if m.get("id"))
+
+
+# What a `gemini` id can be besides a model that answers a chat request: an
+# embedding, a picture, or a voice. None of them is any use to cleanup.
+NOT_CHAT = ("embedding", "-image", "-tts", "-audio")
+
+
+def gemini_models(api_key, base_url=GEMINI_URL):
+    """The Gemini models Google AI Studio will answer a chat request with.
+
+    Google serves its embedding, image and speech models out of the same list
+    and names them all `gemini` too, so the prefix alone is not the question;
+    none of those can clean up a sentence. The listing has also been known to
+    hand the ids back in their long form, `models/gemini-3.5-flash`, while a
+    request wants the short one; taking the prefix off costs nothing and is
+    right whichever form arrives.
+    """
+    service = "Google AI Studio"
+    if not api_key:
+        raise ApiError(t("{service} API key is empty. Add it in Settings.",
+                         service=service))
+    try:
+        data = _get_json(
+            f"{base_url.rstrip('/')}/models",
+            {"Authorization": f"Bearer {api_key}", "User-Agent": USER_AGENT},
+        )
+    except ApiError as exc:
+        raise explain(exc, service) from None
+    ids = [(m.get("id") or "").removeprefix("models/") for m in data.get("data", [])]
+    return sorted(i for i in ids
+                  if i.startswith("gemini") and not any(w in i for w in NOT_CHAT))
 
 
 def openai_models(api_key, base_url=OPENAI_URL, service="OpenAI"):

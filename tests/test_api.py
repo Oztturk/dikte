@@ -119,8 +119,21 @@ class ExtractError(unittest.TestCase):
         body = json.dumps({"error": {"code": 42}})
         self.assertIn("42", api._extract_error(body))
 
+    def test_an_error_wrapped_in_an_array(self):
+        """Google's 503 arrives this way, and .get() on a list raises."""
+        body = json.dumps([{"error": {"code": 503,
+                                      "message": "The model is overloaded."}}])
+        self.assertEqual(api._extract_error(body), "The model is overloaded.")
+
     def test_a_body_that_is_not_json(self):
         self.assertEqual(api._extract_error("<html>502</html>"), "<html>502</html>")
+
+    def test_no_shape_at_all_still_comes_back_as_a_string(self):
+        """It runs while an ApiError is being raised: throwing here would
+        escape the `except ApiError` holding the raw transcript."""
+        for body in ("[]", "[1, 2]", '"a string"', "null", "17"):
+            with self.subTest(body=body):
+                self.assertIsInstance(api._extract_error(body), str)
 
     def test_a_wall_of_html_is_cut_short(self):
         self.assertEqual(len(api._extract_error("x" * 5000)), 300)
@@ -384,6 +397,37 @@ class Cleanup(DikteTest):
         self.assertEqual(sent_json(calls[0])["reasoning"],
                          {"effort": "high", "exclude": True})
 
+    def test_gemini_takes_openai_s_flat_field_rather_than_the_object(self):
+        _, calls = self.call(chat_reply("Hello."), reasoning="low",
+                             provider="gemini", service="Google AI Studio")
+        payload = sent_json(calls[0])
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertNotIn("reasoning", payload)
+
+    def test_off_is_asked_for_as_the_lowest_rung_google_actually_has(self):
+        """Sending "none" is a 400, and Flash left alone thinks."""
+        _, calls = self.call(chat_reply("Hello."), reasoning="none",
+                             provider="gemini", service="Google AI Studio")
+        self.assertEqual(sent_json(calls[0])["reasoning_effort"], "minimal")
+
+    def test_a_rung_google_does_not_have_lands_on_the_nearest_one(self):
+        for asked in ("xhigh", "max"):
+            with self.subTest(asked=asked):
+                _, calls = self.call(chat_reply("Hello."), reasoning=asked,
+                                     provider="gemini", service="Google AI Studio")
+                self.assertEqual(sent_json(calls[0])["reasoning_effort"], "high")
+
+    def test_gemini_left_on_the_model_s_own_default_is_told_nothing(self):
+        _, calls = self.call(chat_reply("Hello."), provider="gemini",
+                             service="Google AI Studio")
+        self.assertNotIn("reasoning_effort", sent_json(calls[0]))
+
+    def test_a_missing_gemini_key_says_google_ai_studio(self):
+        with self.assertRaises(api.ApiError) as caught:
+            api.cleanup("hello", "", "gemini-3.5-flash-lite", "prompt",
+                        provider="gemini", service="Google AI Studio")
+        self.assertIn("Google AI Studio", str(caught.exception))
+
     def test_a_local_base_url(self):
         _, calls = self.call(chat_reply("Hello."), base_url="http://localhost:1234/v1")
         self.assertEqual(calls[0].full_url, "http://localhost:1234/v1/chat/completions")
@@ -512,6 +556,40 @@ class ModelLists(DikteTest):
         with self.assertRaises(api.ApiError) as caught:
             api.openai_models("", api.GROQ_URL, "Groq")
         self.assertIn("Groq", str(caught.exception))
+
+    def test_gemini_keeps_only_the_models_that_answer_a_chat_request(self):
+        with fake_urlopen({"data": [{"id": "gemini-3.5-flash"},
+                                    {"id": "text-embedding-004"},
+                                    {"id": "imagen-4.0"},
+                                    {"id": "gemini-2.5-flash-lite"}]}) as calls:
+            models = api.gemini_models("AIza-test")
+        self.assertEqual(calls[0].full_url,
+                         "https://generativelanguage.googleapis.com/v1beta/openai/models")
+        self.assertEqual(models, ["gemini-2.5-flash-lite", "gemini-3.5-flash"])
+
+    def test_the_long_form_of_an_id_is_shortened_to_what_a_request_wants(self):
+        with fake_urlopen({"data": [{"id": "models/gemini-3.5-flash-lite"}]}):
+            self.assertEqual(api.gemini_models("AIza-test"),
+                             ["gemini-3.5-flash-lite"])
+
+    def test_a_gemini_id_that_is_not_a_chat_model_is_left_out(self):
+        """Google names its pictures and its voices `gemini` too."""
+        with fake_urlopen({"data": [{"id": "gemini-3.5-flash"},
+                                    {"id": "gemini-embedding-001"},
+                                    {"id": "gemini-2.5-flash-image"},
+                                    {"id": "gemini-2.5-flash-preview-tts"},
+                                    {"id": "gemini-2.5-native-audio"}]}):
+            self.assertEqual(api.gemini_models("AIza-test"), ["gemini-3.5-flash"])
+
+    def test_gemini_sends_the_key_as_a_bearer_token(self):
+        with fake_urlopen({"data": []}) as calls:
+            api.gemini_models("AIza-test")
+        self.assertEqual(calls[0].get_header("Authorization"), "Bearer AIza-test")
+
+    def test_a_missing_gemini_key_says_google_ai_studio(self):
+        with self.assertRaises(api.ApiError) as caught:
+            api.gemini_models("")
+        self.assertIn("Google AI Studio", str(caught.exception))
 
 
 if __name__ == "__main__":

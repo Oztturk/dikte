@@ -387,6 +387,10 @@ DEFAULTS = {
     "groq_base_url": "https://api.groq.com/openai/v1",
     "openrouter_api_key": "",
     "openrouter_base_url": "https://openrouter.ai/api/v1",
+    "gemini_api_key": "",
+    # Google's OpenAI-compatible endpoint. Cleanup only: there is no
+    # /audio/transcriptions behind it, so it is not one of the TRANSCRIBERS.
+    "gemini_base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
     "opencode_api_key": "",
     "opencode_base_url": "https://opencode.ai/zen/go/v1",
     "transcribe_provider": "local",  # "local", or a key of TRANSCRIBERS
@@ -414,6 +418,8 @@ DEFAULTS = {
     "cleanup_model": "google/gemini-3.5-flash-lite",
     "cleanup_claude_model": "haiku",   # Claude Code: an alias, or a full model id
     "cleanup_codex_model": "",         # empty -> whatever Codex is set to
+    "cleanup_gemini_model": "gemini-3.5-flash-lite",
+    "cleanup_agy_model": "",           # empty -> whatever Antigravity is set to
     "cleanup_opencode_model": "deepseek-v4-flash",
     "cleanup_reasoning": "",        # empty -> whatever the model does by default
 
@@ -460,6 +466,7 @@ DEFAULTS = {
     "pause_shortcut": "",
     "evdev_hotkey": False,
     "overlay_corner": "bottom-left",
+    "overlay_screen": "",
     "keep_audio": False,
     "history_limit": 200,
     # A look at the releases page once a day, and nothing more than a look:
@@ -487,12 +494,13 @@ DEFAULTS = {
 
     # --- speaking a command to an agent -------------------------------------
     "assistant_shortcut": "",       # empty -> tray only
-    "assistant_provider": "claude",  # claude | codex | openrouter
+    "assistant_provider": "claude",  # claude | codex | agy | openrouter
     "assistant_model": "sonnet",    # Claude Code: an alias, or a full model id
     "assistant_permission_mode": "auto",
     "assistant_codex_model": "",    # empty -> whatever Codex is set to
     "assistant_codex_sandbox": "workspace-write",
     "assistant_openrouter_model": "google/gemini-3.5-flash",
+    "assistant_agy_model": "",      # empty -> whatever Antigravity is set to
     "assistant_opencode_model": "deepseek-v4-flash",
     "assistant_reasoning": "",      # empty -> the model's own default
     "assistant_dir": "",            # empty -> the home directory
@@ -635,6 +643,9 @@ class Config:
 
     def openrouter_key(self):
         return self.api_key("openrouter_api_key")
+
+    def gemini_key(self):
+        return self.api_key("gemini_api_key")
 
     def opencode_key(self):
         return self.api_key("opencode_api_key")

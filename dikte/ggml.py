@@ -670,19 +670,23 @@ def _enumerated(text, backend, index):
 def _card_name(text, handle):
     """The card behind a ggml handle like "Vulkan0", named the way it sells.
 
-    Three places carry a name and only the third is always meaningful: the
-    handle says which slot, whisper's own device listing says whichever the
-    backend reported, and the backend's enumeration says what the thing is
-    called. Whichever of them is not just the handle again wins.
+    The backend's own enumeration is asked first because it is the only listing
+    indexed the way the handle is. whisper numbers every device it can see in
+    one sequence, so the Vulkan card can be its device 1 while being Vulkan0,
+    and reading that row by the handle's digit names whatever else was in slot
+    zero. The handle itself is never an answer: it says which slot, and a line
+    reading "Vulkan, Vulkan0" tells nobody which card is doing the work.
     """
     parts = _HANDLE.match(handle or "")
     backend, index = (parts.group(1), parts.group(2) or "0") if parts else ("", "0")
-    for slot, name, _kind in _WHISPER_DEVICE.findall(text):
-        if slot == index and name.strip() and not _BARE.match(name.strip()):
-            return name.strip()
-    # The handle itself is not an answer: it says which slot, and a line
-    # reading "Vulkan, Vulkan0" tells nobody which card is doing the work.
-    return _enumerated(text, backend, index)
+    found = _enumerated(text, backend, index)
+    if found:
+        return found
+    # Nothing enumerated: whisper's own listing is all there is, and a single
+    # named device in it can only be the one that ran.
+    named = [name.strip() for _slot, name, kind in _WHISPER_DEVICE.findall(text)
+             if kind != "0" and name.strip() and not _BARE.match(name.strip())]
+    return named[0] if len(named) == 1 else ""
 
 # The startup chatter is the first few hundred lines; the rest of the file is a
 # line per request and grows for as long as the server lives.
@@ -805,6 +809,10 @@ class Server:
         # first, and reporting the new model beside the old process would name
         # a model this server is not running.
         self._live = {}
+        # The copy that is running, resolved rather than configured: the
+        # setting is usually empty, meaning whichever one program_path finds,
+        # and which one it found decides what advice is worth giving.
+        self._binary = ""
         # The pid this instance last wrote to its pid file, so _forget never
         # removes a file some other Dikte wrote after us.
         self._pid = 0
@@ -864,6 +872,8 @@ class Server:
                 "device": accel.device,
                 "layers": accel.layers,
                 "available": list(accel.available),
+                "binary": self._binary if up else "",
+                "downloaded": bool(up and is_downloaded(self._binary)),
             }
 
     def error(self):
@@ -891,6 +901,8 @@ class Server:
             with self._lock:
                 self._proc, self._port, self._log, self._key = proc, port, log, key
                 self._accel, self._live = accel, settings
+                self._binary = program_path(self.program,
+                                            settings.get("binary", ""))
             return self.base_url()
 
     def _current_url(self):
@@ -1019,6 +1031,7 @@ class Server:
             proc, self._proc = self._proc, None
             self._port, self._log, self._key = 0, "", None
             self._accel, self._live = NO_ACCEL, {}
+            self._binary = ""
         self._kill(proc, gently=True)
         if proc is not None:
             self._forget()
@@ -1205,6 +1218,11 @@ def sweep():
 def state():
     """What each local server is doing, keyed by program name."""
     return {server.program.name: server.state() for server in SERVERS}
+
+
+def is_downloaded(path):
+    """Whether `path` is a copy Dikte fetched rather than one the system has."""
+    return bool(path) and _under(path, BIN_DIR)
 
 
 def server_log(program):

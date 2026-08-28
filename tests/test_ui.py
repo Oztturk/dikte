@@ -1205,6 +1205,20 @@ class LocalModels(DikteTest):
         self.assertIn("processor", whisper)
         self.assertIn("no graphics backend", whisper)
 
+    def test_the_downloaded_build_is_told_what_to_install(self):
+        # whisper.cpp publishes nothing that reaches a card on this system, and
+        # a copy on the PATH is used ahead of Dikte's own, so that is the fix.
+        whisper, _ = self.shown(backend="CPU", device="CPU", available=["CPU"],
+                                downloaded=True)
+        self.assertIn("Dikte downloaded", whisper)
+        self.assertIn("whisper-server", whisper)
+
+    def test_a_system_build_is_not_told_to_install_itself(self):
+        whisper, _ = self.shown(backend="CPU", device="CPU", available=["CPU"],
+                                downloaded=False)
+        self.assertIn("no graphics backend", whisper)
+        self.assertNotIn("Dikte downloaded", whisper)
+
     def test_a_build_that_could_have_used_one_says_the_other_thing(self):
         whisper, _ = self.shown(backend="CPU", device="CPU",
                                 available=["CUDA", "CPU"])

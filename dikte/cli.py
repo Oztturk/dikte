@@ -854,23 +854,32 @@ def _local_where(entry):
     return where + (f" ({detail})" if detail else "")
 
 
-def _local_note(entry):
-    """Why the card is not in use, for a setup that asked for it and got none."""
+def _local_note(name, entry):
+    """Why the card is not in use, for a setup that asked for it and got none.
+
+    Three answers, because the thing to do about it differs: no card here, a
+    build that could never use one, and a build Dikte downloaded that could
+    never use one, which is the only case with a fix worth naming.
+    """
     if not entry.get("gpu_wanted"):
         return ""
     if ggml.accel_kind({**entry, "running": True}) != "cpu":
         return ""
-    return ("  - the graphics card is switched on and this build carries none"
-            if ggml.cpu_only_build(entry)
-            else "  - the graphics card is switched on and none was found")
+    if not ggml.cpu_only_build(entry):
+        return "  - the graphics card is switched on and none was found"
+    if entry.get("downloaded"):
+        return (f"  - the graphics card is switched on and the downloaded build "
+                f"has no GPU backend; a {name}-server on your system would be "
+                f"used ahead of it")
+    return "  - the graphics card is switched on and this build carries none"
 
 
-def _local_line(entry):
+def _local_line(name, entry):
     if not entry.get("running"):
         return "not loaded"
     model = entry.get("model") or ""
     return (f"loaded on {_local_where(entry)}"
-            + (f", {model}" if model else "") + _local_note(entry))
+            + (f", {model}" if model else "") + _local_note(name, entry))
 
 
 def _last_local(conf):
@@ -882,12 +891,17 @@ def _last_local(conf):
     rather than a reading of a live one.
     """
     rows = {}
-    for program, used, gpu in (
+    for program, used, gpu, custom in (
             (ggml.WHISPER, conf["transcribe_provider"] == "local",
-             bool(conf["local_gpu"])),
-            (ggml.LLAMA, conf.uses_local_llm(), bool(conf["local_llm_gpu"]))):
+             bool(conf["local_gpu"]), conf["local_binary"]),
+            (ggml.LLAMA, conf.uses_local_llm(), bool(conf["local_llm_gpu"]),
+             conf["local_llm_binary"])):
         accel = ggml.last_accel(program)
+        binary = ggml.program_path(program, custom)
         rows[program.name] = {
+            # Which copy would run now, since the log does not say which one
+            # wrote it; the advice only differs for Dikte's own download.
+            "downloaded": ggml.is_downloaded(binary),
             # Whether one ever started here at all, which the backend cannot
             # say on its own: a server that ran and named no backend and one
             # that never ran both leave it empty.
@@ -922,7 +936,7 @@ def cmd_status(opts):
     # from an instance too old to have been asked.
     for name, entry in (reply.get("local") or {}).items():
         if entry.get("used") or entry.get("running"):
-            lines.append(f"{name + ':':11}{_local_line(entry)}")
+            lines.append(f"{name + ':':11}{_local_line(name, entry)}")
     return out(opts, reply, "\n".join(lines))
 
 
@@ -1016,12 +1030,12 @@ def cmd_doctor(opts):
             lines.append(f"· {name:14} the running instance is too old to say; "
                          f"reload it with: dikte restart")
         elif entry.get("running"):
-            lines.append(f"✓ {name:14} {_local_line(entry)}")
+            lines.append(f"✓ {name:14} {_local_line(name, entry)}")
         elif live:
             lines.append(f"· {name:14} not loaded")
         elif entry.get("backend"):
             lines.append(f"· {name:14} last run on "
-                         f"{_local_where(entry)}{_local_note(entry)}")
+                         f"{_local_where(entry)}{_local_note(name, entry)}")
         elif entry.get("ran"):
             lines.append(f"· {name:14} last run said nothing about what it "
                          f"was running on")

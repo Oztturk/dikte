@@ -806,6 +806,12 @@ class LocalModels(DikteTest):
         self.assertIn("loaded on the processor", line)
         self.assertIn("this build carries none", line)
 
+    def test_the_downloaded_build_is_told_where_a_working_one_comes_from(self):
+        line = self.status({"whisper": self.entry(
+            backend="CPU", device="CPU", available=["CPU"], downloaded=True)})
+        self.assertIn("downloaded build has no GPU backend", line)
+        self.assertIn("whisper-server on your system", line)
+
     def test_a_card_the_build_could_have_used_says_something_else(self):
         line = self.status({"whisper": self.entry(
             backend="CPU", device="CPU", available=["CUDA", "CPU"])})

@@ -608,6 +608,36 @@ load_tensors: offloaded 0/29 layers to GPU
 """
 
 
+# A downloaded processor-only build pointed at the system's Vulkan backend
+# through GGML_BACKEND_PATH. whisper numbers every device it can see in one
+# sequence, so the card is its device 1 while still being Vulkan0.
+WHISPER_LENT_BACKEND = """\
+load_backend: loaded CPU backend from /data/bin/whisper/libggml-cpu-haswell.so
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon RX 6600 (RADV NAVI23) (radv) | uma: 0
+load_backend: loaded Vulkan backend from /usr/lib/ggml/libggml-vulkan.so
+whisper_model_load:      Vulkan0 total size =   189.49 MB
+whisper_backend_init_gpu: device 0: CPU (type: 0)
+whisper_backend_init_gpu: device 1: Vulkan0 (type: 1)
+whisper_backend_init_gpu: found GPU device 1: Vulkan0 (type: 1, cnt: 0)
+whisper_backend_init_gpu: using Vulkan0 backend
+"""
+
+# Two cards, and the one that ran is not the one in the slot the handle names.
+# Reading whisper's listing by the handle's digit would name the other card.
+WHISPER_TWO_CARDS = """\
+ggml_vulkan: Found 1 Vulkan devices:
+ggml_vulkan: 0 = AMD Radeon RX 6600 (RADV NAVI23) (radv) | uma: 0
+load_backend: loaded CUDA backend from /opt/whisper/libggml-cuda.so
+load_backend: loaded Vulkan backend from /opt/whisper/libggml-vulkan.so
+load_backend: loaded CPU backend from /opt/whisper/libggml-cpu-haswell.so
+whisper_model_load:      Vulkan0 total size =   189.49 MB
+whisper_backend_init_gpu: device 0: NVIDIA GeForce RTX 4070 (type: 1)
+whisper_backend_init_gpu: device 1: Vulkan0 (type: 1)
+whisper_backend_init_gpu: using Vulkan0 backend
+"""
+
+
 class WhatItRunsOn(Local):
     """Reading the backend back out of the log the server wrote."""
 
@@ -647,6 +677,18 @@ class WhatItRunsOn(Local):
         # "(radv)" is how it is reached; "(RADV NAVI23)" is what it is called.
         self.assertNotIn("(radv)",
                          self.read(ggml.WHISPER, WHISPER_VULKAN).device)
+
+    def test_a_card_numbered_one_way_and_handled_another_is_still_named(self):
+        accel = self.read(ggml.WHISPER, WHISPER_LENT_BACKEND)
+        self.assertEqual(accel.backend, "Vulkan")
+        self.assertEqual(accel.device, "AMD Radeon RX 6600 (RADV NAVI23)")
+
+    def test_the_card_named_is_the_one_the_handle_belongs_to(self):
+        # whisper's device 0 is the other card. The handle is Vulkan0, and
+        # Vulkan's own device 0 is the AMD one.
+        accel = self.read(ggml.WHISPER, WHISPER_TWO_CARDS)
+        self.assertEqual(accel.device, "AMD Radeon RX 6600 (RADV NAVI23)")
+        self.assertNotIn("NVIDIA", ggml.accel_detail(accel))
 
     def test_a_card_that_failed_to_start_is_not_a_card_in_use(self):
         # It was listed, it was tried, it did not work, and whisper went on
@@ -693,6 +735,14 @@ class WhatItRunsOn(Local):
         # twice reads like two different things.
         self.assertEqual(ggml.accel_detail(self.read(ggml.WHISPER, WHISPER_CPU)),
                          "CPU")
+
+    def test_which_copy_is_running_decides_what_advice_is_worth_giving(self):
+        mine = ggml.BIN_DIR / "whisper" / "b1" / "whisper-server"
+        mine.parent.mkdir(parents=True, exist_ok=True)
+        mine.write_text("#!/bin/sh\n")
+        self.assertTrue(ggml.is_downloaded(str(mine)))
+        self.assertFalse(ggml.is_downloaded("/usr/bin/whisper-server"))
+        self.assertFalse(ggml.is_downloaded(""))
 
     def test_nothing_is_running_is_not_a_backend(self):
         self.assertEqual(ggml.accel_kind({"running": False, "backend": "CUDA"}),

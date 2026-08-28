@@ -691,11 +691,13 @@ class SettingsWindow(QDialog):
     def _show_local_state(self):
         """What each model on this machine is loaded on, as it is now."""
         local = ggml.state()
-        self.local_state.setText(self._local_state_text(local.get("whisper", {})))
-        self.local_llm_state.setText(self._local_state_text(local.get("llama", {})))
+        self.local_state.setText(
+            self._local_state_text(ggml.WHISPER, local.get("whisper", {})))
+        self.local_llm_state.setText(
+            self._local_state_text(ggml.LLAMA, local.get("llama", {})))
 
     @staticmethod
-    def _local_state_text(entry):
+    def _local_state_text(program, entry):
         """One line: whether the model is loaded, and what it ended up on.
 
         Four answers rather than two, because "could not tell" is a real one: a
@@ -714,13 +716,20 @@ class SettingsWindow(QDialog):
             return t("Loaded on the graphics card ({detail}).", detail=detail)
         if not entry.get("gpu_wanted"):
             return t("Loaded on the processor ({detail}).", detail=detail)
-        if ggml.cpu_only_build(entry):
-            return t("Loaded on the processor: this build carries no graphics "
-                     "backend, so the box above cannot change that. A build "
-                     "from your distribution, or one you point at above, may "
-                     "reach the card.")
-        return t("Loaded on the processor: the graphics card is switched on, "
-                 "but none was found.")
+        if not ggml.cpu_only_build(entry):
+            return t("Loaded on the processor: the graphics card is switched "
+                     "on, but none was found.")
+        # The one case with a fix worth naming: whisper.cpp publishes no build
+        # that can reach a card on most systems, and Dikte runs a system copy
+        # ahead of its own, so installing one is the whole remedy.
+        if entry.get("downloaded"):
+            return t("Loaded on the processor: the build Dikte downloaded "
+                     "carries no graphics backend. A {binary} from your own "
+                     "system is used ahead of it, so installing one is what "
+                     "reaches the card.", binary=program.binary)
+        return t("Loaded on the processor: this {binary} carries no graphics "
+                 "backend, so the box above cannot change that.",
+                 binary=program.binary)
 
     def _scrolled(self, page):
         """A tab that scrolls instead of growing the window to fit."""
